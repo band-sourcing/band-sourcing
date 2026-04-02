@@ -1,0 +1,74 @@
+band:
+  target_bands:
+    - "잡화천국22"
+    - "의류천국22"
+  cutoff_date: "2026-02-01"
+
+margin:
+  price_tiers:
+    - min_price: 1000000
+      margin: 200000
+    - min_price: 500000
+      margin: 150000
+    - min_price: 300000
+      margin: 100000
+  category_margins:
+    bag_watch: 54000
+    outer: 44000
+    etc: 34000
+
+category_keywords:
+  bag_watch:
+    - "가방"
+    - "백"
+    - "시계"
+    - "토트"
+    - "숄더백"
+    - "크로스백"
+    - "클러치"
+    - "워치"
+    - "핸드백"
+    - "배낭"
+    - "백팩"
+    - "파우치"
+    - "지갑"
+  outer:
+    - "자켓"
+    - "블루종"
+    - "패딩"
+    - "코트"
+    - "바람막이"
+    - "점퍼"
+    - "아우터"
+    - "윈드"
+    - "후드집업"
+    - "야상"
+    - "무스탕"
+    - "트렌치"
+    - "베스트"
+
+brand_map:
+  "#FG": "FERRAGAMO"
+  "#PD": "PRADA"
+  "#NK": "NIKE"
+  "#AZ": "AMAZINGCORE"
+  "#GC": "GUCCI"
+  "#LV": "LOUIS VUITTON"
+  "#BL": "BALENCIAGA"
+  "#AD": "ADIDAS"
+  "#NF": "THE NORTH FACE"
+  "#BV": "BOTTEGA VENETA"
+
+images:
+  notice_url: "https://choonsik1.com/wp-content/uploads/notice-banner.jpg"
+
+auto_delete:
+  enabled: true
+  max_products: 1500
+
+database:
+  path: "data/products.db"
+
+logging:
+  level: "INFO"
+  log_dir: "logs"
