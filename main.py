@@ -89,6 +89,9 @@ def main():
 
         for post in new_posts:
             try:
+                if not post.get("content"):
+                    logger.debug(f"content 없음 (post_key={post['post_key']}), 건너뜀")
+                    continue
                 products = parse_post(
                     content=post["content"],
                     brand_map=config["brand_map"],

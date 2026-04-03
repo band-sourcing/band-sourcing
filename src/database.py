@@ -66,6 +66,7 @@ class Database:
                 products_created  INTEGER DEFAULT 0,
                 products_skipped  INTEGER DEFAULT 0,
                 products_deleted  INTEGER DEFAULT 0,
+                products_updated  INTEGER DEFAULT 0,
                 errors            TEXT,
                 status            TEXT DEFAULT 'running'
             )
@@ -177,6 +178,7 @@ class Database:
                 products_created = ?,
                 products_skipped = ?,
                 products_deleted = ?,
+                products_updated = ?,
                 errors = ?,
                 status = ?
             WHERE id = ?
@@ -186,6 +188,7 @@ class Database:
             stats.get("products_created", 0),
             stats.get("products_skipped", 0),
             stats.get("products_deleted", 0),
+            stats.get("products_updated", 0),
             json.dumps(stats.get("errors", []), ensure_ascii=False),
             status,
             run_id

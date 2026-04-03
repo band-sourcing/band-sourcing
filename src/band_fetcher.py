@@ -82,8 +82,12 @@ class BandFetcher:
             if not next_params:
                 break
 
-            params = next_params
-            params["locale"] = "ko_KR"
+            params = {
+                "access_token": self.token,
+                "band_key": band_key,
+                "locale": "ko_KR",
+                **next_params
+            }
 
             time.sleep(0.5)
 

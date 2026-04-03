@@ -1,3 +1,4 @@
+import time
 import logging
 from woocommerce import API as WooAPI
 
@@ -110,6 +111,7 @@ class WooCommerceUploader:
                     self.db.update_product_price(
                         existing["id"], median_cost, new_sell_price, new_margin
                     )
+                    time.sleep(1)  # WC API rate limit 방지
                     return "price_updated"
                 else:
                     logger.error(f"WC 가격 업데이트 실패: {resp.status_code} {resp.text}")
@@ -143,6 +145,7 @@ class WooCommerceUploader:
                 post_key
             )
 
+            time.sleep(1)  # WC API rate limit 방지
             return "created"
         else:
             logger.error(f"WC 상품 생성 실패: {resp.status_code} {resp.text}")
