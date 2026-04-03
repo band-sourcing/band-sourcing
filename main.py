@@ -4,6 +4,7 @@ import os
 import logging
 from datetime import datetime
 
+from src.exclusion_filter import should_exclude
 sys.path.insert(0, os.path.dirname(__file__))
 
 from src.config import load_config
@@ -99,6 +100,10 @@ def main():
                 )
 
                 for product in products:
+                    # Exclusion Filter
+                    if should_exclude(product, config.get("exclusion", {})):
+                        stats["products_skipped"] += 1
+                        continue
                     category = classify_category(
                         product.product_name,
                         product.source_band,

@@ -33,9 +33,13 @@ class WooCommerceUploader:
         return "<br>".join(parts)
 
     def _build_product_data(self, product: ParsedProduct, sell_price: int, photo_urls: list[str]) -> dict:
-        images = [{"src": self.notice_image_url, "position": 0}]
-        for i, url in enumerate(photo_urls):
-            images.append({"src": url, "position": i + 1})
+        if photo_urls:
+            images = [{"src": photo_urls[0], "position": 0}]
+            images.append({"src": self.notice_image_url, "position": 1})
+            for i, url in enumerate(photo_urls[1:]):
+                images.append({"src": url, "position": i + 2})
+        else:
+            images = [{"src": self.notice_image_url, "position": 0}]
 
         name = format_product_name(product.brand_name_en, product.product_name)
 

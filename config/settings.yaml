@@ -30,8 +30,6 @@ category_keywords:
     - "핸드백"
     - "배낭"
     - "백팩"
-    - "파우치"
-    - "지갑"
   outer:
     - "자켓"
     - "블루종"
@@ -68,6 +66,18 @@ auto_delete:
 
 database:
   path: "data/products.db"
+
+exclusion:
+  factory_codes:
+    enabled: true
+    codes:
+      - "qe"
+      - "bs"
+      - "af"
+  free_size:
+    enabled: true
+    target_bands:
+      - "의류천국22"
 
 logging:
   level: "INFO"
