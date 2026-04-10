@@ -123,18 +123,15 @@ class BandScraper:
         )
         self._page = self._context.new_page()
 
-        # Band 로그인 페이지
         self._page.goto(BAND_LOGIN, wait_until="domcontentloaded", timeout=30000)
         time.sleep(2)
 
-        # 네이버 로그인 버튼 클릭
         naver_btn = self._page.locator('a.-naver, button.-naver, [class*="naver"]').first
         if naver_btn.count() == 0:
             naver_btn = self._page.locator('a[href*="naver"], button:has-text("네이버")')
         naver_btn.first.click()
         time.sleep(5)
 
-        # 네이버 로그인 폼
         current_url = self._page.url
         if "nid.naver.com" in current_url:
             id_input = self._page.locator('input#id, input[name="id"]').first
@@ -159,7 +156,6 @@ class BandScraper:
             login_btn.click()
             time.sleep(10)
 
-        # 로그인 후 Band 피드로 리다이렉트 대기
         logger.info("로그인 대기 중... (최대 120초)")
         for i in range(120):
             current = self._page.url
@@ -200,10 +196,6 @@ class BandScraper:
     # ── 밴드 검색 (get_band_keys 호환) ──
 
     def get_band_keys(self, target_names: list[str]) -> dict[str, str]:
-        """
-        가입된 밴드 목록에서 target_names에 해당하는 밴드의 URL key를 추출.
-        반환: {"잡화천국22": "band_url_key", ...}
-        """
         self.ensure_logged_in()
 
         result = {}
@@ -224,7 +216,6 @@ class BandScraper:
         return result
 
     def _find_band_key(self, band_name: str) -> str | None:
-        """밴드 이름으로 검색하여 band_key(URL path)를 찾는다."""
         self._page.goto(f"{BAND_HOME}/feed", wait_until="domcontentloaded", timeout=30000)
         time.sleep(2)
 
@@ -280,10 +271,8 @@ class BandScraper:
         max_scroll_attempts = 100
 
         for scroll_attempt in range(max_scroll_attempts):
-            post_elements = self._page.locator(
-                '[class*="postWrap"], [class*="post_wrap"], '
-                '[data-viewname*="post"], article[class*="post"]'
-            )
+            # ★ 핵심 수정: 개별 게시글 article 단위로 선택
+            post_elements = self._page.locator('article._postMainWrap')
             current_count = post_elements.count()
 
             new_found = False
@@ -361,11 +350,13 @@ class BandScraper:
 
     def _extract_post_key(self, el) -> str | None:
         """게시글 고유 키 추출."""
+        # data 속성에서 추출
         for attr in ["data-post-id", "data-postid", "data-post_key"]:
             val = el.get_attribute(attr)
             if val:
                 return val
 
+        # ★ 밴드 실제 DOM: a[href="/band/XXXXX/post/YYYYY"] 패턴
         link = el.locator('a[href*="/post/"]').first
         if link.count() > 0:
             href = link.get_attribute("href") or ""
@@ -373,6 +364,7 @@ class BandScraper:
             if m:
                 return m.group(1)
 
+        # fallback: content 해시
         content = el.inner_text()[:200]
         if content.strip():
             return hashlib.md5(content.encode()).hexdigest()[:16]
@@ -381,35 +373,30 @@ class BandScraper:
 
     def _extract_content(self, el) -> str:
         """게시글 본문 텍스트 추출."""
+        # ★ 밴드 실제 DOM: p.txtBody 안에 본문 텍스트
         selectors = [
+            'p.txtBody',
+            '.postText',
+            '._postText',
             '[class*="postText"]',
-            '[class*="post_text"]',
-            '[class*="postBody"]',
-            '[class*="post_body"]',
             '[class*="txtBody"]',
-            '[class*="txt_body"]',
-            '.postContent',
-            '.post_content',
-            'p[class*="text"]',
         ]
 
         for sel in selectors:
             text_el = el.locator(sel).first
             if text_el.count() > 0:
                 text = text_el.inner_text().strip()
-                if text and len(text) > 5:
+                if text and len(text) > 3:
                     return text
-
-        full_text = el.inner_text().strip()
-        if full_text and len(full_text) > 10:
-            return full_text
 
         return ""
 
     def _extract_timestamp(self, el) -> int | None:
         """게시글 작성 시간을 ms timestamp로 추출."""
+        # ★ 밴드 실제 DOM: <time class="time">3시간 전</time>
         time_el = el.locator("time").first
         if time_el.count() > 0:
+            # datetime 속성이 있으면 사용
             dt_attr = time_el.get_attribute("datetime")
             if dt_attr:
                 try:
@@ -418,6 +405,13 @@ class BandScraper:
                 except Exception:
                     pass
 
+            # 없으면 텍스트 파싱
+            date_text = time_el.inner_text().strip()
+            ts = self._parse_date_text(date_text)
+            if ts:
+                return ts
+
+        # data 속성 fallback
         for attr in ["data-created-at", "data-timestamp", "data-time"]:
             val = el.get_attribute(attr)
             if val and val.isdigit():
@@ -426,24 +420,11 @@ class BandScraper:
                     return ts
                 return ts * 1000
 
-        date_selectors = [
-            '[class*="date"]',
-            '[class*="time"]',
-            '[class*="ago"]',
-            'span[class*="post_time"]',
-        ]
-        for sel in date_selectors:
-            date_el = el.locator(sel).first
-            if date_el.count() > 0:
-                date_text = date_el.inner_text().strip()
-                ts = self._parse_date_text(date_text)
-                if ts:
-                    return ts
-
         return None
 
     def _parse_date_text(self, text: str) -> int | None:
         """한국어 날짜 텍스트를 ms timestamp로 변환."""
+        # "2026년 3월 15일" 패턴
         m = re.search(r'(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일', text)
         if m:
             try:
@@ -452,6 +433,7 @@ class BandScraper:
             except Exception:
                 pass
 
+        # "3월 15일" 패턴 (올해)
         m = re.search(r'(\d{1,2})월\s*(\d{1,2})일', text)
         if m:
             try:
@@ -460,189 +442,112 @@ class BandScraper:
             except Exception:
                 pass
 
+        # "N시간 전"
         m = re.search(r'(\d+)\s*시간\s*전', text)
         if m:
             hours = int(m.group(1))
             return int((time.time() - hours * 3600) * 1000)
 
+        # "N분 전"
         m = re.search(r'(\d+)\s*분\s*전', text)
         if m:
             mins = int(m.group(1))
             return int((time.time() - mins * 60) * 1000)
 
+        # "N일 전"
         m = re.search(r'(\d+)\s*일\s*전', text)
         if m:
             days = int(m.group(1))
             return int((time.time() - days * 86400) * 1000)
 
+        # "어제"
         if "어제" in text:
             return int((time.time() - 86400) * 1000)
+
+        # "방금"
+        if "방금" in text:
+            return int(time.time() * 1000)
 
         return None
 
     def _extract_photos(self, el) -> list[dict]:
         """
-        게시글 이미지 URL 추출 (강화 버전).
+        게시글 이미지 URL 추출.
 
-        밴드 웹은 이미지를 여러 방식으로 렌더링:
-        1. <img src="..."> 또는 <img data-src="..."> (lazy load)
-        2. <div style="background-image: url(...)"> (썸네일)
-        3. <a> 또는 <div> 내 data-image-url 속성
-        4. 이미지 래퍼 안의 숨겨진 원본 URL
+        밴드 실제 DOM 구조:
+        <img src="https://coresos-phinf.pstatic.net/..." alt="사용자가 올린 이미지" class="_image">
         """
         photos = []
         seen_urls = set()
 
         SKIP_PATTERNS = [
-            "profile", "avatar", "icon", "emoji", "static",
-            "banner", "logo", "thumb_small", "1x1",
+            "profile", "avatar", "icon", "emoji",
             "sticker", "emoticon", "gif_origin",
+            "logo", "1x1",
         ]
 
         def _should_skip(url: str) -> bool:
             low = url.lower()
             return any(skip in low for skip in SKIP_PATTERNS)
 
-        def _is_valid_image_url(url: str) -> bool:
-            if not url or len(url) < 10:
-                return False
-            if not url.startswith("http"):
-                return False
-            if _should_skip(url):
-                return False
-            return True
-
-        def _add_photo(url: str):
-            clean = self._get_full_res_url(url.strip())
-            if clean and clean not in seen_urls and _is_valid_image_url(clean):
-                seen_urls.add(clean)
-                photos.append({"url": clean})
-
-        # ── 방법 1: <img> 태그 (src / data-src / data-original) ──
-        img_elements = el.locator("img")
+        # ★ 밴드 실제 DOM: img._image 가 상품 이미지
+        img_elements = el.locator('img._image')
         count = img_elements.count()
+
         for i in range(count):
             try:
                 img = img_elements.nth(i)
-                for attr in ["src", "data-src", "data-original", "data-lazy-src"]:
-                    src = img.get_attribute(attr) or ""
-                    if src:
-                        _add_photo(src)
-                        break  # 하나의 img에서 하나만
+                src = img.get_attribute("src") or img.get_attribute("data-src") or ""
+
+                if not src or not src.startswith("http"):
+                    continue
+                if _should_skip(src):
+                    continue
+                if src in seen_urls:
+                    continue
+
+                seen_urls.add(src)
+                clean_url = self._get_full_res_url(src)
+                photos.append({"url": clean_url})
             except Exception:
                 continue
 
-        # ── 방법 2: background-image CSS (밴드 썸네일 패턴) ──
-        bg_selectors = [
-            '[class*="photo"] [style*="background"]',
-            '[class*="image"] [style*="background"]',
-            '[class*="thumb"] [style*="background"]',
-            '[class*="img"] [style*="background"]',
-            '[style*="background-image"]',
-        ]
-        for sel in bg_selectors:
-            try:
-                bg_els = el.locator(sel)
-                bg_count = bg_els.count()
-                for i in range(bg_count):
-                    style = bg_els.nth(i).get_attribute("style") or ""
-                    m = re.search(r'background-image:\s*url\(["\']?([^"\')\s]+)["\']?\)', style)
-                    if m:
-                        _add_photo(m.group(1))
-            except Exception:
-                continue
-
-        # ── 방법 3: data-image-url / data-photo-url 속성 ──
-        data_attr_selectors = [
-            '[data-image-url]',
-            '[data-photo-url]',
-            '[data-original-url]',
-            '[data-src-url]',
-        ]
-        for sel in data_attr_selectors:
-            try:
-                data_els = el.locator(sel)
-                data_count = data_els.count()
-                for i in range(data_count):
-                    node = data_els.nth(i)
-                    for attr in ["data-image-url", "data-photo-url", "data-original-url", "data-src-url"]:
-                        val = node.get_attribute(attr) or ""
-                        if val:
-                            _add_photo(val)
-            except Exception:
-                continue
-
-        # ── 방법 4: 이미지 갤러리 컨테이너 내부 <a> 링크 ──
-        gallery_selectors = [
-            '[class*="photoList"] a',
-            '[class*="photo_list"] a',
-            '[class*="imageList"] a',
-            '[class*="image_list"] a',
-            '[class*="photoGrid"] a',
-            '[class*="photo_grid"] a',
-            '[class*="postPhoto"] a',
-            '[class*="post_photo"] a',
-        ]
-        for sel in gallery_selectors:
-            try:
-                links = el.locator(sel)
-                link_count = links.count()
-                for i in range(link_count):
-                    href = links.nth(i).get_attribute("href") or ""
-                    if href and ("phinf" in href or "dthumb" in href or href.endswith((".jpg", ".jpeg", ".png", ".webp"))):
-                        _add_photo(href)
-            except Exception:
-                continue
-
-        # ── 방법 5: JavaScript로 DOM에서 직접 이미지 URL 추출 ──
+        # fallback: img._image가 없으면 모든 img 중 상품 이미지 찾기
         if not photos:
-            try:
-                js_urls = el.evaluate("""(el) => {
-                    const urls = [];
+            all_imgs = el.locator('img')
+            count = all_imgs.count()
+            for i in range(count):
+                try:
+                    img = all_imgs.nth(i)
+                    src = img.get_attribute("src") or img.get_attribute("data-src") or ""
+                    alt = img.get_attribute("alt") or ""
 
-                    // img 태그
-                    el.querySelectorAll('img').forEach(img => {
-                        const src = img.src || img.dataset.src || img.dataset.original || '';
-                        if (src && src.startsWith('http')) urls.push(src);
-                    });
+                    if not src or not src.startswith("http"):
+                        continue
+                    if _should_skip(src):
+                        continue
+                    # 밴드 이미지 CDN 패턴 or "사용자가 올린 이미지" alt
+                    if "phinf" not in src and "사용자" not in alt:
+                        continue
+                    if src in seen_urls:
+                        continue
 
-                    // background-image
-                    el.querySelectorAll('*').forEach(node => {
-                        const bg = window.getComputedStyle(node).backgroundImage;
-                        if (bg && bg !== 'none') {
-                            const m = bg.match(/url\\(["']?([^"')]+)["']?\\)/);
-                            if (m && m[1].startsWith('http')) urls.push(m[1]);
-                        }
-                    });
-
-                    // data 속성
-                    el.querySelectorAll('[data-image-url], [data-photo-url], [data-original-url]').forEach(node => {
-                        const val = node.dataset.imageUrl || node.dataset.photoUrl || node.dataset.originalUrl || '';
-                        if (val && val.startsWith('http')) urls.push(val);
-                    });
-
-                    return [...new Set(urls)];
-                }""")
-                for url in (js_urls or []):
-                    _add_photo(url)
-            except Exception as e:
-                logger.debug(f"JS 이미지 추출 실패: {e}")
-
-        if photos:
-            logger.debug(f"이미지 {len(photos)}개 추출 완료")
-        else:
-            logger.debug("이미지 추출 실패 (0개)")
+                    seen_urls.add(src)
+                    clean_url = self._get_full_res_url(src)
+                    photos.append({"url": clean_url})
+                except Exception:
+                    continue
 
         return photos
 
     @staticmethod
     def _get_full_res_url(url: str) -> str:
         """밴드 이미지 URL을 최대 해상도로 변환."""
-        # /xx_yy/ 사이즈 파라미터 제거
-        url = re.sub(r'/\d+x\d+/', '/', url)
-        # type=optimize 등 파라미터 제거하되 원본 URL 유지
+        # type=ff500_750 / type=s480 등 리사이즈 파라미터 제거
         url = re.sub(r'[?&]type=[^&]+', '', url)
-        # 밴드 CDN 리사이즈 파라미터 제거
+        # /NNNxNNN/ 사이즈 경로 제거
+        url = re.sub(r'/\d+x\d+/', '/', url)
+        # w= h= 파라미터 제거
         url = re.sub(r'[?&]w=\d+', '', url)
         url = re.sub(r'[?&]h=\d+', '', url)
         # 남은 ? 또는 & 정리
