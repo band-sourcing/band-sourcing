@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from src.config import load_config
 from src.database import Database
-from src.band_fetcher import BandFetcher
+from src.band_scraper import BandScraper
 from src.content_parser import parse_post, ParseError
 from src.margin_engine import calculate_sell_price, classify_category
 from src.wc_uploader import WooCommerceUploader
@@ -49,30 +49,34 @@ def main():
         "products_skipped": 0,
         "products_updated": 0,
         "products_deleted": 0,
+        "parse_errors": 0,
+        "no_image_count": 0,
         "errors": []
     }
 
     try:
-        # Step 1: Band 게시글 수집
-        logger.info("=== Step 1: Band 게시글 수집 ===")
-        fetcher = BandFetcher(
-            access_token=config["band"]["access_token"],
-            cutoff_date=config["band"]["cutoff_date"]
+        # Step 1: Band 게시글 수집 (Playwright)
+        logger.info("=== Step 1: Band 게시글 수집 (Playwright) ===")
+        scraper = BandScraper(
+            naver_id=config["band"]["naver_id"],
+            naver_pw=config["band"]["naver_pw"],
+            cutoff_date=config["band"]["cutoff_date"],
+            session_path="data/band_session.json",
         )
 
-        band_keys = fetcher.get_band_keys(config["band"]["target_bands"])
+        band_keys = scraper.get_band_keys(config["band"]["target_bands"])
         logger.info(f"밴드 발견: {list(band_keys.keys())}")
 
         all_posts = []
         for band_name, band_key in band_keys.items():
-            posts = fetcher.fetch_all_posts(band_key)
+            posts = scraper.fetch_all_posts(band_key)
             for p in posts:
                 p["_source_band"] = band_name
                 p["_band_key"] = band_key
             all_posts.extend(posts)
             logger.info(f"  {band_name}: {len(posts)}개 수집")
 
-        fetcher.close()
+        scraper.close()
         stats["posts_fetched"] = len(all_posts)
         logger.info(f"총 {len(all_posts)}개 게시글 수집 완료")
 
@@ -121,6 +125,9 @@ def main():
                         if not p.get("is_video_thumbnail", False)
                     ]
 
+                    if not photo_urls:
+                        stats["no_image_count"] += 1
+
                     result = uploader.process_product(
                         product=product,
                         sell_price=sell_price,
@@ -133,7 +140,8 @@ def main():
 
                     if result == "created":
                         stats["products_created"] += 1
-                        logger.info(f"  등록: {product.brand_tag} {product.product_name}")
+                        img_info = f"(이미지 {len(photo_urls)}장)" if photo_urls else "(이미지 없음)"
+                        logger.info(f"  등록: {product.brand_tag} {product.product_name} {img_info}")
                     elif result == "skipped":
                         stats["products_skipped"] += 1
                     elif result == "price_updated":
@@ -145,8 +153,11 @@ def main():
                 db.mark_post_processed(post["_band_key"], post["post_key"])
 
             except ParseError as e:
+                stats["parse_errors"] += 1
                 logger.warning(f"파싱 실패 (post_key={post['post_key']}): {e}")
                 stats["errors"].append(f"Parse: {post['post_key']}: {str(e)}")
+                # 파싱 실패해도 processed로 마킹 (재시도 방지)
+                db.mark_post_processed(post["_band_key"], post["post_key"])
             except Exception as e:
                 logger.error(f"처리 실패 (post_key={post['post_key']}): {e}", exc_info=True)
                 stats["errors"].append(f"Error: {post['post_key']}: {str(e)}")
@@ -171,6 +182,8 @@ def main():
             f"건너뜀={stats['products_skipped']} "
             f"업데이트={stats['products_updated']} "
             f"삭제={stats['products_deleted']} "
+            f"파싱에러={stats['parse_errors']} "
+            f"이미지없음={stats['no_image_count']} "
             f"에러={len(stats['errors'])}"
         )
 

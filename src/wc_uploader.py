@@ -1,5 +1,6 @@
 import time
 import logging
+import httpx
 from woocommerce import API as WooAPI
 
 from src.content_parser import ParsedProduct, format_product_name
@@ -7,6 +8,10 @@ from src.margin_engine import calculate_margin
 from src.database import Database
 
 logger = logging.getLogger(__name__)
+
+# 이미지 없는 상품용 WooCommerce 기본 placeholder
+# WC가 기본 제공하는 placeholder 이미지 (플러그인 불필요)
+WC_PLACEHOLDER = "https://choonsik1.com/wp-content/plugins/woocommerce/assets/images/placeholder.png"
 
 
 class WooCommerceUploader:
@@ -20,7 +25,29 @@ class WooCommerceUploader:
         )
         self.db = db
         self.margin_config = config["margin"]
-        self.notice_image_url = config["images"]["notice_url"]
+
+        # 공지 이미지 URL (404이면 None으로 처리)
+        raw_notice_url = config["images"].get("notice_url", "")
+        self.notice_image_url = self._validate_image_url(raw_notice_url)
+
+        # 이미지 없는 상품 처리 모드: "skip" | "placeholder" | "register"
+        self.no_image_mode = config.get("no_image_mode", "register")
+
+    @staticmethod
+    def _validate_image_url(url: str) -> str | None:
+        """이미지 URL이 실제로 접근 가능한지 HEAD 요청으로 확인."""
+        if not url:
+            return None
+        try:
+            resp = httpx.head(url, timeout=10, follow_redirects=True)
+            if resp.status_code == 200:
+                return url
+            else:
+                logger.warning(f"공지 이미지 URL 접근 불가 ({resp.status_code}): {url}")
+                return None
+        except Exception as e:
+            logger.warning(f"공지 이미지 URL 확인 실패: {e}")
+            return None
 
     def _build_description(self, product: ParsedProduct) -> str:
         parts = []
@@ -33,13 +60,26 @@ class WooCommerceUploader:
         return "<br>".join(parts)
 
     def _build_product_data(self, product: ParsedProduct, sell_price: int, photo_urls: list[str]) -> dict:
+        images = []
+        pos = 0
+
+        # 상품 이미지 (첫 번째를 대표 이미지로)
         if photo_urls:
-            images = [{"src": photo_urls[0], "position": 0}]
-            images.append({"src": self.notice_image_url, "position": 1})
-            for i, url in enumerate(photo_urls[1:]):
-                images.append({"src": url, "position": i + 2})
-        else:
-            images = [{"src": self.notice_image_url, "position": 0}]
+            images.append({"src": photo_urls[0], "position": pos})
+            pos += 1
+
+        # 공지 이미지 (존재할 때만)
+        if self.notice_image_url:
+            images.append({"src": self.notice_image_url, "position": pos})
+            pos += 1
+
+        # 나머지 상품 이미지
+        for url in photo_urls[1:]:
+            images.append({"src": url, "position": pos})
+            pos += 1
+
+        # 이미지가 하나도 없으면 빈 배열 (WC가 기본 placeholder 사용)
+        # images가 []이면 WC는 에러 없이 placeholder로 표시
 
         name = format_product_name(product.brand_name_en, product.product_name)
 
@@ -80,6 +120,11 @@ class WooCommerceUploader:
         band_key: str,
         post_key: str
     ) -> str:
+        # 이미지 없는 상품 처리
+        if not photo_urls and self.no_image_mode == "skip":
+            logger.info(f"  스킵(이미지없음): {product.brand_tag} {product.product_name}")
+            return "skipped"
+
         existing = self.db.find_product(
             product.brand_tag, product.product_name, product.set_part
         )
@@ -115,7 +160,7 @@ class WooCommerceUploader:
                     self.db.update_product_price(
                         existing["id"], median_cost, new_sell_price, new_margin
                     )
-                    time.sleep(1)  # WC API rate limit 방지
+                    time.sleep(1)
                     return "price_updated"
                 else:
                     logger.error(f"WC 가격 업데이트 실패: {resp.status_code} {resp.text}")
@@ -149,7 +194,7 @@ class WooCommerceUploader:
                 post_key
             )
 
-            time.sleep(1)  # WC API rate limit 방지
+            time.sleep(1)
             return "created"
         else:
             logger.error(f"WC 상품 생성 실패: {resp.status_code} {resp.text}")
