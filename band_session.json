@@ -1,0 +1,112 @@
+[
+  {
+    "name": "oauthVerifyToken",
+    "value": "\"3fb90ae6:FjkZX0KqvjomA/srEmdgGuhQDs9aZ6PdEjSlnJQslN8=\"",
+    "domain": ".band.us",
+    "path": "/oauth2/authorize",
+    "expires": -1,
+    "httpOnly": false,
+    "secure": true,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "secretKey",
+    "value": "\"OPlRn4KcAbGv68t1agora3x9CJXH+ZSlaU7cFeUkMrg=\"",
+    "domain": ".band.us",
+    "path": "/s/login/getKey",
+    "expires": -1,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "BBC",
+    "value": "8Wqg7qBgkK88ASa0ZAUOcS",
+    "domain": ".band.us",
+    "path": "/",
+    "expires": 1810339260.000346,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "di",
+    "value": "web-AAAAABzhzUE3niDR3QcAZ10sWIV36dmzKP_fOYmYBCqCELiNJFiZ6cj4KHpVZlduHHWlss",
+    "domain": ".band.us",
+    "path": "/",
+    "expires": 1810339273.238533,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "band_session",
+    "value": "ZQIAAPdV6NS6hzn40Kl2t5tVYaVe_2QDS7Ek7zxMF7SXKRCEiGEShmHcz-yxGWTa0AtGe9ZPQ5cWhKDq9ozANZlPYWfxTLP6X1kUr6nZ1-PLM3LZ",
+    "domain": ".band.us",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "as",
+    "value": "\"3fb90ae6:FjkZX0KqvjomA/srEmdgGuhQDs9aZ6PdEjSlnJQslN8=\"",
+    "domain": ".band.us",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": false,
+    "secure": true,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "ai",
+    "value": "\"8679e7d,19d7efe4d27\"",
+    "domain": ".band.us",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "rt",
+    "value": "\"ZQIAANZXno6UUGyH_SbOswY8oQmu96ilieXYNVMTRH49q_fJeK4iu-natWLqhlu6UnkzDIHG0bd7nSDLKSn9WtLI44GmReHdaI54_adIPW-TEegW,s\"",
+    "domain": ".auth.band.us",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": false,
+    "secure": true,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "SESSION",
+    "value": "9Mtairv9PsimT/Y9cskYYb/NCx08iV9rz0l5A7hOPQJ2VTykAuDfnqQ3vit2EnKq",
+    "domain": "auth.band.us",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "JSESSIONID",
+    "value": "A3E4DD1A56F1628A911E9644F3628BD3",
+    "domain": "www.band.us",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": true,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "language",
+    "value": "ko",
+    "domain": ".band.us",
+    "path": "/",
+    "expires": 1810339431.647308,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  }
+]
