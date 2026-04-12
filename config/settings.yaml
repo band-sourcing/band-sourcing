@@ -253,14 +253,18 @@ brand_map:
 
 wc_categories:
   bag_watch:
-    name: "가방/시계"
+    bag_id: 85
+    watch_id: 86
+    watch_keywords:
+      - "시계"
+      - "워치"
   outer:
-    name: "아우터"
+    id: 78
   etc:
-    name: "기타"
+    id: 89
 
 images:
-  notice_url: "https://choonsik1.com/wp-content/uploads/notice-banner.jpg"
+  notice_url: "https://choonsik1.com/wp-content/uploads/2026/04/notice-banner.webp"
 
 auto_delete:
   enabled: true

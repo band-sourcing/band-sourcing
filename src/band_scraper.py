@@ -258,6 +258,7 @@ class BandScraper:
         """
         밴드의 게시글을 스크롤하면서 수집.
         cutoff_date 이전 게시글이 나오면 중단.
+        2-pass: 가격코드 누락된 게시글은 상세 페이지에서 보충.
         """
         self.ensure_logged_in()
 
@@ -271,7 +272,6 @@ class BandScraper:
         max_scroll_attempts = 100
 
         for scroll_attempt in range(max_scroll_attempts):
-            # ★ 핵심 수정: 개별 게시글 article 단위로 선택
             post_elements = self._page.locator('article._postMainWrap')
             current_count = post_elements.count()
 
@@ -317,6 +317,46 @@ class BandScraper:
             self._page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             time.sleep(2)
 
+        logger.info(f"밴드 {band_key}: 1차 수집 {len(all_posts)}개")
+
+        # ── 2-pass: 가격코드 없는 게시글 상세 페이지 방문 ──
+        PRICE_RE = re.compile(r'\d{3}\s*\([A-Za-z][A-Za-z0-9]*\)')
+        need_detail = [p for p in all_posts if p["content"] and not PRICE_RE.search(p["content"])]
+        logger.info(f"  가격코드 누락 {len(need_detail)}개 -> 상세 페이지 보충 시작")
+
+        for idx, post in enumerate(need_detail):
+            post_url = post.get("_detail_url", "")
+            if not post_url:
+                continue
+            try:
+                self._page.goto(post_url, wait_until="domcontentloaded", timeout=15000)
+                time.sleep(1.5)
+
+                detail_selectors = [
+                    'p.txtBody',
+                    '.postText',
+                    '._postText',
+                    '[class*="postText"]',
+                    '[class*="txtBody"]',
+                    '.dPostBody',
+                    '._postBody',
+                ]
+
+                for sel in detail_selectors:
+                    text_el = self._page.locator(sel).first
+                    if text_el.count() > 0:
+                        text = text_el.inner_text().strip()
+                        if text and len(text) > 3 and PRICE_RE.search(text):
+                            post["content"] = text
+                            logger.debug(f"  [{idx}] 상세 보충 성공: {len(text)}자")
+                            break
+
+            except Exception as e:
+                logger.debug(f"  [{idx}] 상세 진입 실패: {e}")
+
+        filled = sum(1 for p in need_detail if PRICE_RE.search(p.get("content", "")))
+        logger.info(f"  상세 보충 완료: {filled}/{len(need_detail)}개 성공")
+
         logger.info(f"밴드 {band_key}: 총 {len(all_posts)}개 게시글 수집")
         return all_posts
 
@@ -337,11 +377,14 @@ class BandScraper:
 
             photos = self._extract_photos(el)
 
+            detail_url = self._extract_post_url(el)
+
             return {
                 "post_key": f"{band_key}_{post_key}",
                 "created_at": created_at,
                 "content": content,
                 "photos": photos,
+                "_detail_url": detail_url,
             }
 
         except Exception as e:
@@ -350,13 +393,11 @@ class BandScraper:
 
     def _extract_post_key(self, el) -> str | None:
         """게시글 고유 키 추출."""
-        # data 속성에서 추출
         for attr in ["data-post-id", "data-postid", "data-post_key"]:
             val = el.get_attribute(attr)
             if val:
                 return val
 
-        # ★ 밴드 실제 DOM: a[href="/band/XXXXX/post/YYYYY"] 패턴
         link = el.locator('a[href*="/post/"]').first
         if link.count() > 0:
             href = link.get_attribute("href") or ""
@@ -364,7 +405,6 @@ class BandScraper:
             if m:
                 return m.group(1)
 
-        # fallback: content 해시
         content = el.inner_text()[:200]
         if content.strip():
             return hashlib.md5(content.encode()).hexdigest()[:16]
@@ -372,8 +412,7 @@ class BandScraper:
         return None
 
     def _extract_content(self, el) -> str:
-        """게시글 본문 텍스트 추출."""
-        # ★ 밴드 실제 DOM: p.txtBody 안에 본문 텍스트
+        """게시글 본문 텍스트 추출 (피드 목록에서만 - 스크롤 안전)."""
         selectors = [
             'p.txtBody',
             '.postText',
@@ -391,12 +430,22 @@ class BandScraper:
 
         return ""
 
+    def _extract_post_url(self, el) -> str:
+        """게시글 상세 페이지 URL 추출."""
+        link = el.locator('a[href*="/post/"]').first
+        if link.count() == 0:
+            return ""
+        href = link.get_attribute("href") or ""
+        if href.startswith("/"):
+            return f"https://band.us{href}"
+        if href.startswith("http"):
+            return href
+        return ""
+
     def _extract_timestamp(self, el) -> int | None:
         """게시글 작성 시간을 ms timestamp로 추출."""
-        # ★ 밴드 실제 DOM: <time class="time">3시간 전</time>
         time_el = el.locator("time").first
         if time_el.count() > 0:
-            # datetime 속성이 있으면 사용
             dt_attr = time_el.get_attribute("datetime")
             if dt_attr:
                 try:
@@ -405,13 +454,11 @@ class BandScraper:
                 except Exception:
                     pass
 
-            # 없으면 텍스트 파싱
             date_text = time_el.inner_text().strip()
             ts = self._parse_date_text(date_text)
             if ts:
                 return ts
 
-        # data 속성 fallback
         for attr in ["data-created-at", "data-timestamp", "data-time"]:
             val = el.get_attribute(attr)
             if val and val.isdigit():
@@ -424,7 +471,6 @@ class BandScraper:
 
     def _parse_date_text(self, text: str) -> int | None:
         """한국어 날짜 텍스트를 ms timestamp로 변환."""
-        # "2026년 3월 15일" 패턴
         m = re.search(r'(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일', text)
         if m:
             try:
@@ -433,7 +479,6 @@ class BandScraper:
             except Exception:
                 pass
 
-        # "3월 15일" 패턴 (올해)
         m = re.search(r'(\d{1,2})월\s*(\d{1,2})일', text)
         if m:
             try:
@@ -442,41 +487,31 @@ class BandScraper:
             except Exception:
                 pass
 
-        # "N시간 전"
         m = re.search(r'(\d+)\s*시간\s*전', text)
         if m:
             hours = int(m.group(1))
             return int((time.time() - hours * 3600) * 1000)
 
-        # "N분 전"
         m = re.search(r'(\d+)\s*분\s*전', text)
         if m:
             mins = int(m.group(1))
             return int((time.time() - mins * 60) * 1000)
 
-        # "N일 전"
         m = re.search(r'(\d+)\s*일\s*전', text)
         if m:
             days = int(m.group(1))
             return int((time.time() - days * 86400) * 1000)
 
-        # "어제"
         if "어제" in text:
             return int((time.time() - 86400) * 1000)
 
-        # "방금"
         if "방금" in text:
             return int(time.time() * 1000)
 
         return None
 
     def _extract_photos(self, el) -> list[dict]:
-        """
-        게시글 이미지 URL 추출.
-
-        밴드 실제 DOM 구조:
-        <img src="https://coresos-phinf.pstatic.net/..." alt="사용자가 올린 이미지" class="_image">
-        """
+        """게시글 이미지 URL 추출."""
         photos = []
         seen_urls = set()
 
@@ -490,7 +525,6 @@ class BandScraper:
             low = url.lower()
             return any(skip in low for skip in SKIP_PATTERNS)
 
-        # ★ 밴드 실제 DOM: img._image 가 상품 이미지
         img_elements = el.locator('img._image')
         count = img_elements.count()
 
@@ -512,7 +546,6 @@ class BandScraper:
             except Exception:
                 continue
 
-        # fallback: img._image가 없으면 모든 img 중 상품 이미지 찾기
         if not photos:
             all_imgs = el.locator('img')
             count = all_imgs.count()
@@ -526,7 +559,6 @@ class BandScraper:
                         continue
                     if _should_skip(src):
                         continue
-                    # 밴드 이미지 CDN 패턴 or "사용자가 올린 이미지" alt
                     if "phinf" not in src and "사용자" not in alt:
                         continue
                     if src in seen_urls:
@@ -543,14 +575,10 @@ class BandScraper:
     @staticmethod
     def _get_full_res_url(url: str) -> str:
         """밴드 이미지 URL을 최대 해상도로 변환."""
-        # type=ff500_750 / type=s480 등 리사이즈 파라미터 제거
         url = re.sub(r'[?&]type=[^&]+', '', url)
-        # /NNNxNNN/ 사이즈 경로 제거
         url = re.sub(r'/\d+x\d+/', '/', url)
-        # w= h= 파라미터 제거
         url = re.sub(r'[?&]w=\d+', '', url)
         url = re.sub(r'[?&]h=\d+', '', url)
-        # 남은 ? 또는 & 정리
         url = re.sub(r'\?&', '?', url)
         url = re.sub(r'\?$', '', url)
         return url

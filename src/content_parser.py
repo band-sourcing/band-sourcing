@@ -128,31 +128,26 @@ def _extract_measurements(lines: list[str]) -> str | None:
 
 # ── 민감정보 제거 (소비자에게 노출하면 안 되는 내용) ──
 
-# 가격코드 라인: "070 (QI)", "121 (AI24)", "상의 053 (AL)" 등
 _PRICE_CODE_RE = re.compile(
     r'^\s*(?:상의|하의)?\s*\d{3}\s*\([A-Za-z][A-Za-z0-9]*\)\s*$'
 )
 
-# 브랜드 해시태그 단독 라인: "#FG", "#PD" 등
 _BRAND_TAG_RE = re.compile(r'^\s*#[A-Za-z]{2,4}\s*$')
 
-# 카카오톡/연락처 정보
 _CONTACT_RE = re.compile(
     r'카카오톡|카톡|카톡채널|카카오.*채널|카카오.*문의|'
     r'카톡.*추가|카톡.*친구|친구추가|'
     r'톡문의|톡.*상담|채팅.*문의|'
-    r'e\d{4}|'  # 카톡 ID 패턴 (e7132 등)
-    r'010[-\s]?\d{4}[-\s]?\d{4}',  # 전화번호
+    r'e\d{4}|'
+    r'010[-\s]?\d{4}[-\s]?\d{4}',
     re.IGNORECASE
 )
 
-# 공장코드/등급 해시태그: "#SA급", "#고퀄", "#qe", "#bs" 등
 _GRADE_TAG_RE = re.compile(
     r'#(?:SA급|고퀄|1:1|정품급|최상급|S급|A급|AA급|AAA급)',
     re.IGNORECASE
 )
 
-# 소싱 관련 정보 (국내배송 가격 등 - 원가 노출)
 _SOURCING_INFO_RE = re.compile(
     r'국내배송.*?₩[\d,]+|'
     r'₩[\d,]+.*?국내배송|'
@@ -171,29 +166,16 @@ def _clean_raw_content(cleaned_text: str) -> str:
         stripped = line.strip()
         if not stripped:
             continue
-
-        # 가격코드 라인 제거
         if _PRICE_CODE_RE.match(stripped):
             continue
-
-        # 브랜드 해시태그 단독 라인 제거
         if _BRAND_TAG_RE.match(stripped):
             continue
-
-        # 카카오톡/연락처 정보 포함 라인 제거
         if _CONTACT_RE.search(stripped):
             continue
 
-        # 등급 해시태그 제거 (라인 전체가 아닌 태그만 제거)
         cleaned_line = _GRADE_TAG_RE.sub('', stripped)
-
-        # 소싱 가격 정보 제거
         cleaned_line = _SOURCING_INFO_RE.sub('', cleaned_line)
-
-        # 인라인 브랜드 해시태그 제거 (#LV, #FG 등이 다른 텍스트와 함께 있는 경우)
         cleaned_line = re.sub(r'#[A-Za-z]{2,4}\b', '', cleaned_line)
-
-        # 정리
         cleaned_line = cleaned_line.strip()
         if cleaned_line:
             result.append(cleaned_line)
@@ -312,8 +294,6 @@ def parse_set_product(content: str, brand_map: dict) -> list[ParsedProduct]:
 
 def parse_post(content: str, brand_map: dict, source_band: str) -> list[ParsedProduct]:
     cleaned = preprocess_content(content)
-
-    # 민감정보 제거한 소비자용 본문 생성
     consumer_text = _clean_raw_content(cleaned)
 
     if is_set_product(cleaned):
@@ -331,7 +311,6 @@ def parse_post(content: str, brand_map: dict, source_band: str) -> list[ParsedPr
 if __name__ == "__main__":
     brand_map = {"#PD": "PRADA", "#NK": "NIKE", "#AZ": "AMAZINGCORE"}
 
-    # 일반 상품 테스트
     test1 = """#PD
 아르케 리나일론 숄더
 사이즈 : 22.0 x 18.0 x 6.0 cm
@@ -346,7 +325,6 @@ if __name__ == "__main__":
     print(f"  시즌: {p.season_code}")
     print(f"  raw_content: [{p.raw_content}]")
 
-    # 의류 테스트
     test2 = """#NK
 로* 윈드배색바람막이
 색상-블랙,화이트,그레이
@@ -365,7 +343,6 @@ if __name__ == "__main__":
     print(f"  원가: {p.cost_price:,}원")
     print(f"  raw_content: [{p.raw_content}]")
 
-    # 세트 상품 테스트
     test3 = """#AZ
 "네오테크 후디 셋업"
 색상: 그레이/ 블랙
@@ -380,7 +357,6 @@ if __name__ == "__main__":
         print(f"  {p.set_part}: {format_product_name(p.brand_name_en, p.product_name)} -> {p.cost_price:,}원")
     print(f"  raw_content: [{result3[0].raw_content}]")
 
-    # 민감정보 제거 테스트
     test4 = """#LV
 반돌리에 25
 사이즈 : 25.0 x 19.0 x 15.0 cm
