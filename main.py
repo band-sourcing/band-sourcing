@@ -64,7 +64,11 @@ def main():
             session_path="data/band_session.json",
         )
 
-        band_keys = scraper.get_band_keys(config["band"]["target_bands"])
+        # 밴드 키가 설정에 있으면 직접 사용 (검색 우회)
+        if config["band"].get("band_keys"):
+            band_keys = config["band"]["band_keys"]
+        else:
+            band_keys = scraper.get_band_keys(config["band"]["target_bands"])
         logger.info(f"밴드 발견: {list(band_keys.keys())}")
 
         all_posts = []
