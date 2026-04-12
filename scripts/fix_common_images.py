@@ -65,8 +65,16 @@ def should_remove_img(src: str) -> bool:
         return True
     if src in FOOTER_URLS:
         return True
-    # fwc5at 패턴 추가 안전장치
-    if "_fwc5at" in src:
+    # 하단 고정 이미지 파일명 매칭 (URL 전체가 다를 수 있으므로 파일명으로)
+    FOOTER_FILE_IDS = {
+        "3_c94Ud018svcuglxur2ti9xu_fwc5at",
+        "3_b94Ud018svct4ncqwo9v77y_fwc5at",
+        "3_a94Ud018svcafq130uomry2_fwc5at",
+        "3_894Ud018svc1hofcwsdwnyjf_fwc5at",
+        "3_794Ud018svc1jlqptz5ydktb_fwc5at",
+        "3_694Ud018svc1k59mta8uohbe_fwc5at",
+    }
+    if any(fid in src for fid in FOOTER_FILE_IDS):
         return True
     return False
 

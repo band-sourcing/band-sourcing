@@ -519,15 +519,28 @@ class BandScraper:
             "profile", "avatar", "icon", "emoji",
             "sticker", "emoticon", "gif_origin",
             "logo", "1x1",
-            # 밴드 공통 이미지 (프로필/배너/하단 고정)
+            # 밴드 공통 이미지 (프로필/배너)
             "a_h9hUd018svc19uvfzsdn00w9_4k8958",
             "_5ksoqj",
-            "_fwc5at",
         ]
+
+        # 밴드 하단 고정 이미지 6개 (정확한 URL 매칭)
+        FOOTER_EXACT = {
+            "3_c94Ud018svcuglxur2ti9xu_fwc5at",
+            "3_b94Ud018svct4ncqwo9v77y_fwc5at",
+            "3_a94Ud018svcafq130uomry2_fwc5at",
+            "3_894Ud018svc1hofcwsdwnyjf_fwc5at",
+            "3_794Ud018svc1jlqptz5ydktb_fwc5at",
+            "3_694Ud018svc1k59mta8uohbe_fwc5at",
+        }
 
         def _should_skip(url: str) -> bool:
             low = url.lower()
-            return any(skip in low for skip in SKIP_PATTERNS)
+            if any(skip in low for skip in SKIP_PATTERNS):
+                return True
+            if any(fid in url for fid in FOOTER_EXACT):
+                return True
+            return False
 
         img_elements = el.locator('img._image')
         count = img_elements.count()
