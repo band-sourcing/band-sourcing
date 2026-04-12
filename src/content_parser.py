@@ -21,6 +21,7 @@ class ParsedProduct:
     season_code: str = ""
     set_part: str | None = None
     source_band: str = ""
+    raw_content: str = ""
 
 
 def preprocess_content(raw_content: str) -> str:
@@ -123,6 +124,81 @@ def _extract_measurements(lines: list[str]) -> str | None:
         if pattern.search(line):
             return line.strip()
     return None
+
+
+# ── 민감정보 제거 (소비자에게 노출하면 안 되는 내용) ──
+
+# 가격코드 라인: "070 (QI)", "121 (AI24)", "상의 053 (AL)" 등
+_PRICE_CODE_RE = re.compile(
+    r'^\s*(?:상의|하의)?\s*\d{3}\s*\([A-Za-z][A-Za-z0-9]*\)\s*$'
+)
+
+# 브랜드 해시태그 단독 라인: "#FG", "#PD" 등
+_BRAND_TAG_RE = re.compile(r'^\s*#[A-Za-z]{2,4}\s*$')
+
+# 카카오톡/연락처 정보
+_CONTACT_RE = re.compile(
+    r'카카오톡|카톡|카톡채널|카카오.*채널|카카오.*문의|'
+    r'카톡.*추가|카톡.*친구|친구추가|'
+    r'톡문의|톡.*상담|채팅.*문의|'
+    r'e\d{4}|'  # 카톡 ID 패턴 (e7132 등)
+    r'010[-\s]?\d{4}[-\s]?\d{4}',  # 전화번호
+    re.IGNORECASE
+)
+
+# 공장코드/등급 해시태그: "#SA급", "#고퀄", "#qe", "#bs" 등
+_GRADE_TAG_RE = re.compile(
+    r'#(?:SA급|고퀄|1:1|정품급|최상급|S급|A급|AA급|AAA급)',
+    re.IGNORECASE
+)
+
+# 소싱 관련 정보 (국내배송 가격 등 - 원가 노출)
+_SOURCING_INFO_RE = re.compile(
+    r'국내배송.*?₩[\d,]+|'
+    r'₩[\d,]+.*?국내배송|'
+    r'해외배송.*?₩[\d,]+|'
+    r'₩[\d,]+.*?해외배송',
+    re.IGNORECASE
+)
+
+
+def _clean_raw_content(cleaned_text: str) -> str:
+    """밴드 본문에서 민감정보를 제거한 소비자용 텍스트 생성."""
+    lines = cleaned_text.split('\n')
+    result = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        # 가격코드 라인 제거
+        if _PRICE_CODE_RE.match(stripped):
+            continue
+
+        # 브랜드 해시태그 단독 라인 제거
+        if _BRAND_TAG_RE.match(stripped):
+            continue
+
+        # 카카오톡/연락처 정보 포함 라인 제거
+        if _CONTACT_RE.search(stripped):
+            continue
+
+        # 등급 해시태그 제거 (라인 전체가 아닌 태그만 제거)
+        cleaned_line = _GRADE_TAG_RE.sub('', stripped)
+
+        # 소싱 가격 정보 제거
+        cleaned_line = _SOURCING_INFO_RE.sub('', cleaned_line)
+
+        # 인라인 브랜드 해시태그 제거 (#LV, #FG 등이 다른 텍스트와 함께 있는 경우)
+        cleaned_line = re.sub(r'#[A-Za-z]{2,4}\b', '', cleaned_line)
+
+        # 정리
+        cleaned_line = cleaned_line.strip()
+        if cleaned_line:
+            result.append(cleaned_line)
+
+    return '\n'.join(result)
 
 
 def parse_single_product(content: str, brand_map: dict) -> ParsedProduct:
@@ -237,6 +313,9 @@ def parse_set_product(content: str, brand_map: dict) -> list[ParsedProduct]:
 def parse_post(content: str, brand_map: dict, source_band: str) -> list[ParsedProduct]:
     cleaned = preprocess_content(content)
 
+    # 민감정보 제거한 소비자용 본문 생성
+    consumer_text = _clean_raw_content(cleaned)
+
     if is_set_product(cleaned):
         products = parse_set_product(cleaned, brand_map)
     else:
@@ -244,6 +323,7 @@ def parse_post(content: str, brand_map: dict, source_band: str) -> list[ParsedPr
 
     for p in products:
         p.source_band = source_band
+        p.raw_content = consumer_text
 
     return products
 
@@ -264,6 +344,7 @@ if __name__ == "__main__":
     print(f"  상품명: {format_product_name(p.brand_name_en, p.product_name)}")
     print(f"  원가: {p.cost_price:,}원")
     print(f"  시즌: {p.season_code}")
+    print(f"  raw_content: [{p.raw_content}]")
 
     # 의류 테스트
     test2 = """#NK
@@ -282,6 +363,7 @@ if __name__ == "__main__":
     print(f"  사이즈: {p.sizes}")
     print(f"  실측: {p.measurements}")
     print(f"  원가: {p.cost_price:,}원")
+    print(f"  raw_content: [{p.raw_content}]")
 
     # 세트 상품 테스트
     test3 = """#AZ
@@ -296,5 +378,26 @@ if __name__ == "__main__":
     print("\n=== 세트 상품 테스트 ===")
     for p in result3:
         print(f"  {p.set_part}: {format_product_name(p.brand_name_en, p.product_name)} -> {p.cost_price:,}원")
+    print(f"  raw_content: [{result3[0].raw_content}]")
+
+    # 민감정보 제거 테스트
+    test4 = """#LV
+반돌리에 25
+사이즈 : 25.0 x 19.0 x 15.0 cm
+소재 : 모노그램 코팅 캔버스 / 카우하이드 가죽 트리밍
+#SA급 #고퀄
+국내배송(3~ 5일) ₩186,000
+카카오톡 친구추가 : e7132
+186 (QI)"""
+
+    brand_map_ext = {**brand_map, "#LV": "LOUIS VUITTON"}
+    result4 = parse_post(test4, brand_map_ext, "잡화천국22")
+    p = result4[0]
+    print("\n=== 민감정보 제거 테스트 ===")
+    print(f"  상품명: {format_product_name(p.brand_name_en, p.product_name)}")
+    print(f"  raw_content: [{p.raw_content}]")
+    print(f"  가격코드 노출?: {'186 (QI)' in p.raw_content}")
+    print(f"  카톡 노출?: {'카카오톡' in p.raw_content}")
+    print(f"  등급태그 노출?: {'SA급' in p.raw_content}")
 
     print("\ncontent_parser.py 정상 동작!")

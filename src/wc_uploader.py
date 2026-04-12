@@ -33,6 +33,11 @@ class WooCommerceUploader:
         # 이미지 없는 상품 처리 모드: "skip" | "placeholder" | "register"
         self.no_image_mode = config.get("no_image_mode", "register")
 
+        # WC 카테고리 ID 캐시 (margin category -> WC category ID)
+        self._wc_category_cache: dict[str, int] = {}
+        self._wc_categories_config = config.get("wc_categories", {})
+        self._init_wc_categories()
+
     @staticmethod
     def _validate_image_url(url: str) -> str | None:
         """이미지 URL이 실제로 접근 가능한지 HEAD 요청으로 확인."""
@@ -49,46 +54,120 @@ class WooCommerceUploader:
             logger.warning(f"공지 이미지 URL 확인 실패: {e}")
             return None
 
-    def _build_description(self, product: ParsedProduct) -> str:
+    # ── WC 카테고리 초기화 ──
+
+    def _init_wc_categories(self):
+        """WC 카테고리 조회/생성하여 ID 캐싱."""
+        if not self._wc_categories_config:
+            logger.info("wc_categories 설정 없음 → 카테고리 매핑 건너뜀")
+            return
+
+        try:
+            # 기존 WC 카테고리 전체 조회
+            existing = {}
+            page = 1
+            while True:
+                resp = self.api.get("products/categories", params={
+                    "per_page": 100,
+                    "page": page
+                })
+                if resp.status_code != 200:
+                    logger.error(f"WC 카테고리 조회 실패: {resp.status_code}")
+                    break
+                cats = resp.json()
+                if not cats:
+                    break
+                for cat in cats:
+                    existing[cat["name"]] = cat["id"]
+                page += 1
+
+            logger.info(f"기존 WC 카테고리: {list(existing.keys())}")
+
+            # 설정된 카테고리 매핑
+            for margin_cat, cat_config in self._wc_categories_config.items():
+                cat_name = cat_config["name"]
+
+                if cat_name in existing:
+                    self._wc_category_cache[margin_cat] = existing[cat_name]
+                    logger.info(f"카테고리 매핑: {margin_cat} -> {cat_name} (ID: {existing[cat_name]})")
+                else:
+                    # 새로 생성
+                    create_resp = self.api.post("products/categories", {
+                        "name": cat_name
+                    })
+                    if create_resp.status_code == 201:
+                        new_id = create_resp.json()["id"]
+                        self._wc_category_cache[margin_cat] = new_id
+                        logger.info(f"카테고리 생성: {margin_cat} -> {cat_name} (ID: {new_id})")
+                    else:
+                        logger.error(f"카테고리 생성 실패 ({cat_name}): {create_resp.status_code} {create_resp.text}")
+
+        except Exception as e:
+            logger.error(f"WC 카테고리 초기화 실패: {e}")
+
+    def _get_wc_category_id(self, margin_category: str) -> int | None:
+        """마진 카테고리 코드 → WC 카테고리 ID."""
+        return self._wc_category_cache.get(margin_category)
+
+    # ── Description 빌드 (FIX-1 + FIX-3 + FIX-6) ──
+
+    def _build_description(self, product: ParsedProduct, photo_urls: list[str]) -> str:
+        """
+        상세페이지 description HTML 생성.
+        순서:
+          ① 공지사항 이미지
+          ② 본문 원문 텍스트 (민감정보 제거됨)
+          ③ 상품 이미지 전체 세로 나열
+        """
         parts = []
-        if product.colors:
-            parts.append(f"색상: {', '.join(product.colors)}")
-        if product.sizes:
-            parts.append(f"사이즈: {', '.join(product.sizes)}")
-        if product.measurements:
-            parts.append(f"실측: {product.measurements}")
-        return "<br>".join(parts)
 
-    def _build_product_data(self, product: ParsedProduct, sell_price: int, photo_urls: list[str]) -> dict:
-        images = []
-        pos = 0
-
-        # 상품 이미지 (첫 번째를 대표 이미지로)
-        if photo_urls:
-            images.append({"src": photo_urls[0], "position": pos})
-            pos += 1
-
-        # 공지 이미지 (존재할 때만)
+        # ① 공지사항 이미지 (맨 위)
         if self.notice_image_url:
-            images.append({"src": self.notice_image_url, "position": pos})
-            pos += 1
+            parts.append(
+                f'<img src="{self.notice_image_url}" '
+                f'style="width:100%; margin-bottom:20px;" '
+                f'alt="공지사항">'
+            )
 
-        # 나머지 상품 이미지
-        for url in photo_urls[1:]:
-            images.append({"src": url, "position": pos})
-            pos += 1
+        # ② 본문 텍스트 (raw_content - 민감정보 이미 제거됨)
+        if product.raw_content:
+            # 줄바꿈을 <br>로 변환
+            text_html = product.raw_content.replace('\n', '<br>')
+            parts.append(
+                f'<div style="margin-bottom:20px; line-height:1.8; '
+                f'font-size:14px;">{text_html}</div>'
+            )
 
-        # 이미지가 하나도 없으면 빈 배열 (WC가 기본 placeholder 사용)
-        # images가 []이면 WC는 에러 없이 placeholder로 표시
+        # ③ 상품 이미지 세로 나열 (모든 이미지)
+        for url in photo_urls:
+            parts.append(
+                f'<img src="{url}" '
+                f'style="width:100%; margin-bottom:10px;" '
+                f'alt="상품 이미지">'
+            )
+
+        return '\n'.join(parts)
+
+    def _build_product_data(
+        self,
+        product: ParsedProduct,
+        sell_price: int,
+        photo_urls: list[str],
+        category: str = "etc"
+    ) -> dict:
+        # 목록 썸네일용: 첫 번째 사진 1장만 images 배열에 넣음
+        images = []
+        if photo_urls:
+            images.append({"src": photo_urls[0], "position": 0})
 
         name = format_product_name(product.brand_name_en, product.product_name)
 
-        return {
+        data = {
             "name": name,
             "type": "simple",
             "status": "publish",
             "regular_price": str(sell_price),
-            "description": self._build_description(product),
+            "description": self._build_description(product, photo_urls),
             "short_description": name,
             "images": images,
             "manage_stock": False,
@@ -100,6 +179,13 @@ class WooCommerceUploader:
                 {"key": "_set_part", "value": product.set_part or ""},
             ]
         }
+
+        # WC 카테고리 매핑 (FIX-4)
+        wc_cat_id = self._get_wc_category_id(category)
+        if wc_cat_id:
+            data["categories"] = [{"id": wc_cat_id}]
+
+        return data
 
     @staticmethod
     def _calculate_median(prices: list[int]) -> int:
@@ -166,7 +252,7 @@ class WooCommerceUploader:
                     logger.error(f"WC 가격 업데이트 실패: {resp.status_code} {resp.text}")
                     return "error"
 
-        wc_data = self._build_product_data(product, sell_price, photo_urls)
+        wc_data = self._build_product_data(product, sell_price, photo_urls, category)
 
         resp = self.api.post("products", wc_data)
 
