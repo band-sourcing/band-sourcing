@@ -519,6 +519,10 @@ class BandScraper:
             "profile", "avatar", "icon", "emoji",
             "sticker", "emoticon", "gif_origin",
             "logo", "1x1",
+            # 밴드 공통 이미지 (프로필/배너/하단 고정)
+            "a_h9hUd018svc19uvfzsdn00w9_4k8958",
+            "_5ksoqj",
+            "_fwc5at",
         ]
 
         def _should_skip(url: str) -> bool:
