@@ -357,6 +357,37 @@ class BandScraper:
         filled = sum(1 for p in need_detail if PRICE_RE.search(p.get("content", "")))
         logger.info(f"  상세 보충 완료: {filled}/{len(need_detail)}개 성공")
 
+        # ── 3-pass: 이미지 4장 이하 게시글 → 상세 페이지에서 이미지 재추출 ──
+        # 밴드 피드 UI가 4장까지만 표시하므로 상세 페이지에서 전체 이미지를 가져온다
+        MAX_FEED_IMAGES = 4
+        need_images = [p for p in all_posts if len(p.get("photos", [])) <= MAX_FEED_IMAGES and p.get("photos")]
+        logger.info(f"  이미지 보충 대상 {len(need_images)}개 (≤{MAX_FEED_IMAGES}장)")
+
+        img_supplemented = 0
+        for idx, post in enumerate(need_images):
+            post_url = post.get("_detail_url", "")
+            if not post_url:
+                continue
+            old_count = len(post["photos"])
+            try:
+                self._page.goto(post_url, wait_until="domcontentloaded", timeout=15000)
+                time.sleep(1.5)
+
+                # 상세 페이지의 게시글 컨테이너에서 이미지 추출
+                detail_el = self._page.locator('article._postMainWrap').first
+                if detail_el.count() == 0:
+                    detail_el = self._page.locator('.dPostBody, ._postBody, .postBody').first
+                if detail_el.count() > 0:
+                    detail_photos = self._extract_photos(detail_el)
+                    if len(detail_photos) > old_count:
+                        post["photos"] = detail_photos
+                        img_supplemented += 1
+                        logger.debug(f"  [{idx}] 이미지 보충: {old_count}→{len(detail_photos)}장")
+            except Exception as e:
+                logger.debug(f"  [{idx}] 이미지 상세 진입 실패: {e}")
+
+        logger.info(f"  이미지 보충 완료: {img_supplemented}/{len(need_images)}개 보충됨")
+
         logger.info(f"밴드 {band_key}: 총 {len(all_posts)}개 게시글 수집")
         return all_posts
 

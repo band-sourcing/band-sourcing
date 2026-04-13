@@ -3,13 +3,14 @@ import logging
 logger = logging.getLogger(__name__)
 
 # ── 상품 카테고리 8종 ──
-# bag / watch / outer / top / bottom / accessory / golf / etc
+# bag / watch / wallet / shoes / outer / top / bottom / accessory / etc
 
-# category_keywords 검색 우선순위 (설정 파일 키 순서)
+# category_keywords 검색 우선순위
 _CATEGORY_PRIORITY = [
-    "golf",       # 골프가 가장 먼저 (골프 자켓 → golf, not outer)
     "bag",
     "watch",
+    "wallet",     # accessory보다 먼저 (지갑이 악세사리로 빠지지 않도록)
+    "shoes",      # accessory보다 먼저
     "outer",
     "top",
     "bottom",
@@ -25,18 +26,14 @@ def classify_category(
     golf_brand_tags: list | None = None,
 ) -> str:
     """
-    상품명 + 브랜드 태그 기반으로 8종 카테고리 분류.
+    상품명 기반으로 카테고리 분류.
 
     분류 우선순위:
-    1. golf_brand_tags에 brand_tag가 있으면 → golf
-    2. category_keywords에서 키워드 매칭 (우선순위: golf > bag > watch > outer > top > bottom > accessory)
-    3. 매칭 없으면 → etc
-    """
-    # 1) 골프 브랜드 태그 체크
-    if golf_brand_tags and brand_tag in golf_brand_tags:
-        return "golf"
+    1. category_keywords에서 키워드 매칭 (우선순위: bag > watch > wallet > shoes > outer > top > bottom > accessory)
+    2. 매칭 없으면 → etc
 
-    # 2) 키워드 매칭
+    Note: golf_brand_tags 파라미터는 하위 호환성을 위해 유지하지만 무시됨.
+    """
     text = product_name.lower()
     for cat_key in _CATEGORY_PRIORITY:
         keywords = category_keywords.get(cat_key, [])
@@ -47,38 +44,20 @@ def classify_category(
     return "etc"
 
 
-def get_margin_category(category: str, margin_config: dict) -> str:
-    """
-    세분화된 카테고리(8종) → 마진 카테고리(3종) 변환.
-    margin_category_map이 설정에 없으면 레거시 호환.
-    """
-    cat_map = margin_config.get("margin_category_map", {})
-    if cat_map:
-        return cat_map.get(category, "etc")
-
-    # 레거시 호환: bag_watch / outer / etc
-    if category in ("bag", "watch"):
-        return "bag_watch"
-    elif category == "outer":
-        return "outer"
-    return "etc"
-
-
 def calculate_margin(cost_price: int, category: str, margin_config: dict) -> int:
     """
     마진 계산.
     1) 가격대 마진이 우선 (30만/50만/100만 이상)
-    2) 없으면 카테고리 마진 적용
+    2) 없으면 카테고리 마진 직접 조회
     """
     # 가격대 마진 체크
     for tier in margin_config["price_tiers"]:
         if cost_price >= tier["min_price"]:
             return tier["margin"]
 
-    # 카테고리 마진
-    margin_cat = get_margin_category(category, margin_config)
+    # 카테고리 마진 직접 조회
     return margin_config["category_margins"].get(
-        margin_cat, margin_config["category_margins"]["etc"]
+        category, margin_config["category_margins"].get("etc", 30000)
     )
 
 
@@ -137,7 +116,6 @@ if __name__ == "__main__":
     config = load_config()
     margin_config = config["margin"]
     keywords = config["category_keywords"]
-    golf_tags = config.get("golf_brand_tags", [])
     gender_conf = config.get("gender_classification", {})
 
     test_cases = [
@@ -151,11 +129,13 @@ if __name__ == "__main__":
         ("스톤아일랜드 맨투맨", "의류천국22", 90000, "#ST", ["95", "100", "105"]),
         ("막스마라 슬랙스", "의류천국22", 150000, "#MM", ["44", "55", "66"]),
         ("나이키 스니커즈", "잡화천국22", 60000, "#NK", []),
+        ("구찌 카드지갑", "잡화천국22", 120000, "#GC", []),
+        ("나이키 로퍼", "잡화천국22", 90000, "#NK", []),
     ]
 
-    print("=== 마진 엔진 테스트 (세분화) ===\n")
+    print("=== 마진 엔진 테스트 (v2) ===\n")
     for name, band, cost, tag, sizes in test_cases:
-        category = classify_category(name, band, keywords, tag, golf_tags)
+        category = classify_category(name, band, keywords)
         sell, margin = calculate_sell_price(cost, category, margin_config)
         gender = classify_gender(sizes, gender_conf)
         print(f"  {name}")

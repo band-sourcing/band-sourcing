@@ -15,23 +15,16 @@ margin:
       margin: 150000
     - min_price: 300000
       margin: 100000
-  # 마진 카테고리 (기존 3단계 유지)
-  # bag+watch=+54000 / outer=+44000 / 나머지=+34000
-  # 마진 카테고리와 WC 카테고리는 별도 — margin_category로 매핑
   category_margins:
-    bag_watch: 54000
-    outer: 44000
-    etc: 34000
-  # 세분화된 카테고리 -> 마진 카테고리 매핑
-  margin_category_map:
-    bag: "bag_watch"
-    watch: "bag_watch"
-    outer: "outer"
-    top: "etc"
-    bottom: "etc"
-    accessory: "etc"
-    golf: "etc"
-    etc: "etc"
+    bag: 50000
+    watch: 50000
+    outer: 40000
+    top: 30000
+    bottom: 30000
+    accessory: 30000
+    wallet: 30000
+    shoes: 30000
+    etc: 30000
 
 category_keywords:
   bag:
@@ -107,11 +100,30 @@ category_keywords:
     - "치마"
     - "스커트"
     - "레깅스"
-  accessory:
-    - "벨트"
+  wallet:
     - "지갑"
     - "카드홀더"
+    - "카드지갑"
+    - "반지갑"
+    - "장지갑"
+    - "월렛"
+    - "카드케이스"
+    - "코인지갑"
+    - "키홀더"
     - "키링"
+  shoes:
+    - "스니커즈"
+    - "운동화"
+    - "로퍼"
+    - "구두"
+    - "부츠"
+    - "슬리퍼"
+    - "샌들"
+    - "신발"
+    - "뮬"
+    - "슈즈"
+  accessory:
+    - "벨트"
     - "머플러"
     - "스카프"
     - "선글라스"
@@ -123,14 +135,6 @@ category_keywords:
     - "넥타이"
     - "장갑"
     - "양말"
-    - "슬리퍼"
-    - "샌들"
-    - "스니커즈"
-    - "운동화"
-    - "로퍼"
-    - "구두"
-    - "부츠"
-    - "신발"
     - "향수"
     - "캔들"
     - "주얼리"
@@ -139,23 +143,6 @@ category_keywords:
     - "팔찌"
     - "귀걸이"
     - "브로치"
-  golf:
-    - "골프"
-    - "파리게이츠"
-    - "타이틀리스트"
-    - "풋조이"
-    - "캘러웨이"
-    - "테일러메이드"
-    - "마크앤로나"
-    - "마스터바니"
-    - "제이린드버그"
-    - "지포어"
-    - "왁"
-    - "PXG"
-    - "세인트앤드류"
-    - "스코티카메론"
-    - "사우스케이프"
-    - "캐스텔바작"
 
 brand_map:
   "#AA": "아페쎄(A.P.C)"
@@ -368,35 +355,16 @@ wc_categories:
     outer: 78
     top: 79
     bottom: 82
-    golf: 83
   female:
     outer: 77
     top: 80
     bottom: 81
-    golf: 84
   bag: 85
   watch: 86
   accessory: 89
+  wallet: 0      # TODO: WC API로 ID 조회 후 반영
+  shoes: 0       # TODO: WC API로 ID 조회 후 반영
   etc: 89
-
-# 골프 브랜드 태그 목록 (brand_tag 기반 골프 감지용)
-golf_brand_tags:
-  - "#BN"  # 마스터바니
-  - "#CB"  # 카스텔바작
-  - "#CW"  # 캘러웨이
-  - "#FT"  # 풋조이
-  - "#GF"  # 지포어
-  - "#LB"  # 제이린드버그
-  - "#MD"  # 말본
-  - "#ML"  # 마크앤로나
-  - "#PG"  # 파리게이츠
-  - "#PX"  # 피엑스지
-  - "#SA"  # 세인트앤드류
-  - "#SC"  # 스코티카메론
-  - "#SU"  # 사우스케이프
-  - "#TA"  # 테일러메이드
-  - "#TL"  # 타이틀리스트
-  - "#WC"  # 왁
 
 # 성별 분류용 사이즈 패턴
 gender_classification:

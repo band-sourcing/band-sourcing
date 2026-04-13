@@ -51,21 +51,18 @@ class WooCommerceUploader:
 
     def _resolve_wc_category(self, category: str, product_name: str, gender: str = "male") -> int:
         """
-        세분화된 카테고리(8종) + 성별 → WC 카테고리 ID.
+        카테고리 + 성별 → WC 카테고리 ID.
 
-        - bag/watch/accessory/etc → 성별 무관 (독립 카테고리)
-        - outer/top/bottom/golf → 성별에 따라 남성/여성 하위 카테고리
+        - bag/watch/accessory/wallet/shoes/etc → 성별 무관 (독립 카테고리)
+        - outer/top/bottom → 성별에 따라 남성/여성 하위 카테고리
         """
         # 성별 무관 카테고리
-        if category == "bag":
-            return self._wc_cat_config.get("bag", 85)
-        elif category == "watch":
-            return self._wc_cat_config.get("watch", 86)
-        elif category == "accessory":
-            return self._wc_cat_config.get("accessory", 89)
+        _GENDER_FREE = ("bag", "watch", "accessory", "wallet", "shoes")
+        if category in _GENDER_FREE:
+            return self._wc_cat_config.get(category, self._wc_cat_config.get("etc", 89))
 
-        # 성별 기반 카테고리 (outer / top / bottom / golf)
-        if category in ("outer", "top", "bottom", "golf"):
+        # 성별 기반 카테고리 (outer / top / bottom)
+        if category in ("outer", "top", "bottom"):
             gender_conf = self._wc_cat_config.get(gender, {})
             if isinstance(gender_conf, dict):
                 cat_id = gender_conf.get(category)

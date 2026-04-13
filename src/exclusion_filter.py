@@ -23,10 +23,36 @@ def _is_excluded_factory(season_code: str, excluded_codes: list[str]) -> bool:
 
 
 def _has_free_size(product: ParsedProduct) -> bool:
-    """상품 사이즈에 FREE가 포함되어 있는지 확인"""
+    """상품 사이즈에 FREE가 포함되어 있는지 확인.
+
+    밴드 게시글에서 FREE가 다양한 형태로 적힘:
+    - "FREE" / "free" / "Free"
+    - "남여공용 FREE" (사이즈 파싱 시 통째로 하나의 문자열)
+    - "프리" / "프리사이즈" / "F"
+    """
+    _FREE_MARKERS = {"free", "프리", "프리사이즈"}
+
     for size in product.sizes:
-        if size.strip().upper() == "FREE":
+        s = size.strip()
+        s_upper = s.upper()
+        # exact match
+        if s_upper == "FREE" or s_upper == "F":
             return True
+        # contains match (예: "남여공용 FREE")
+        if "FREE" in s_upper:
+            return True
+        # 한국어 변형
+        if s in _FREE_MARKERS:
+            return True
+
+    # raw_content에서도 FREE 키워드 검색 (사이즈 파싱이 아예 안 된 경우 대비)
+    if product.raw_content:
+        content_upper = product.raw_content.upper()
+        if "사이즈" in product.raw_content and "FREE" in content_upper:
+            return True
+        if "프리사이즈" in product.raw_content:
+            return True
+
     return False
 
 
