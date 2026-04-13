@@ -140,9 +140,9 @@ def main():
             brand_tag=brand_tag, golf_brand_tags=golf_brand_tags,
         )
 
-        # 성별 분류 (WC description에서 사이즈 추출)
+        # 성별 분류 (키워드 + WC description에서 사이즈 추출)
         sizes = extract_sizes_from_wc(api, wc_id)
-        gender = classify_gender(sizes, gender_config)
+        gender = classify_gender(sizes, gender_config, product_name=product_name)
 
         # WC 카테고리 ID
         new_wc_cat_id = resolve_wc_category(new_category, gender, wc_cat_config)

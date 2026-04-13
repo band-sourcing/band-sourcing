@@ -47,6 +47,8 @@ CATEGORY_KEYWORDS = {
 GOLF_BRAND_TAGS = ["#PG", "#TL", "#GF", "#BN", "#ML"]
 
 GENDER_CONFIG = {
+    "female_keywords": ["우먼", "WOMEN", "여성", "레이디", "걸즈"],
+    "male_keywords": ["맨즈", "MEN", "남성"],
     "female_sizes": ["44", "55", "66", "77", "88"],
     "male_sizes": ["90", "95", "100", "105", "110", "115", "120", "30", "32", "34", "36", "38"],
     "default_gender": "male",
@@ -288,4 +290,29 @@ class TestClassifyGender:
 
     def test_single_female_size(self):
         gender = classify_gender(["55"], GENDER_CONFIG)
+        assert gender == "female"
+
+    def test_female_keyword_women(self):
+        """상품명에 WOMEN → female."""
+        gender = classify_gender([], GENDER_CONFIG, product_name="나이키 WOMEN 자켓")
+        assert gender == "female"
+
+    def test_female_keyword_korean(self):
+        """상품명에 우먼 → female."""
+        gender = classify_gender([], GENDER_CONFIG, product_name="구찌 우먼 셔츠")
+        assert gender == "female"
+
+    def test_female_keyword_priority_over_size(self):
+        """키워드가 사이즈보다 우선."""
+        gender = classify_gender(["95", "100"], GENDER_CONFIG, product_name="프라다 우먼 코트")
+        assert gender == "female"
+
+    def test_male_keyword(self):
+        """상품명에 맨즈 → male."""
+        gender = classify_gender(["44", "55"], GENDER_CONFIG, product_name="버버리 맨즈 셔츠")
+        assert gender == "male"
+
+    def test_no_keyword_falls_to_size(self):
+        """키워드 없으면 사이즈로 판단."""
+        gender = classify_gender(["44", "55"], GENDER_CONFIG, product_name="프라다 코트")
         assert gender == "female"

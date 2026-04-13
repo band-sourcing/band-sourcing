@@ -89,14 +89,26 @@ def calculate_sell_price(cost_price: int, category: str, margin_config: dict) ->
 
 # ── 성별 분류 ──
 
-def classify_gender(sizes: list[str], gender_config: dict) -> str:
+def classify_gender(sizes: list[str], gender_config: dict, product_name: str = "") -> str:
     """
-    사이즈 목록 기반 성별 분류.
+    성별 분류. 우선순위:
+    1. 상품명에 여성/남성 키워드 → 즉시 판정
+    2. 사이즈 기반 (44/55/66/77=여 / 90/95/100+=남)
+    3. 판별 불가 → default_gender (기본 male)
+    """
+    # 1) 상품명 키워드 체크
+    if product_name:
+        name_lower = product_name.lower()
+        female_kw = gender_config.get("female_keywords", [])
+        male_kw = gender_config.get("male_keywords", [])
+        for kw in female_kw:
+            if kw.lower() in name_lower:
+                return "female"
+        for kw in male_kw:
+            if kw.lower() in name_lower:
+                return "male"
 
-    - female_sizes (44/55/66/77/88) 포함 → female
-    - male_sizes (90/95/100/.../30/32/34/36/38) 포함 → male
-    - 판별 불가 → default_gender (기본 male)
-    """
+    # 2) 사이즈 기반
     if not sizes:
         return gender_config.get("default_gender", "male")
 
@@ -113,13 +125,10 @@ def classify_gender(sizes: list[str], gender_config: dict) -> str:
         if s in male_markers:
             has_male = True
 
-    # 여성 사이즈만 있으면 female
     if has_female and not has_male:
         return "female"
-    # 남성 사이즈만 있으면 male
     if has_male and not has_female:
         return "male"
-    # 둘 다 있거나 둘 다 없으면 → default (남성)
     return gender_config.get("default_gender", "male")
 
 
