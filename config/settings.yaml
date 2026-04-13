@@ -362,8 +362,8 @@ wc_categories:
   bag: 85
   watch: 86
   accessory: 89
-  wallet: 0      # TODO: WC API로 ID 조회 후 반영
-  shoes: 0       # TODO: WC API로 ID 조회 후 반영
+  wallet: 83      # TODO: WC API로 ID 조회 후 반영
+  shoes: 84       # TODO: WC API로 ID 조회 후 반영
   etc: 89
 
 # 성별 분류용 사이즈 패턴
