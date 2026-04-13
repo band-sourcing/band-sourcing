@@ -18,6 +18,29 @@ _CATEGORY_PRIORITY = [
 ]
 
 
+# 키워드 매칭 실패 시 브랜드 기반 폴백 (시계 전용 브랜드)
+_WATCH_BRAND_TAGS = frozenset([
+    "#RL",  # 로렉스
+    "#OM",  # 오메가
+    "#AP",  # 오데마피게
+    "#HB",  # 위블로
+    "#BR",  # 브라이틀링
+    "#IW",  # IWC
+    "#PK",  # 파텍필립
+    "#VR",  # 바쉐론콘스탄틴
+    "#BU",  # 브레게
+    "#RM",  # 리차드밀
+    "#PI",  # 피아제
+    "#UN",  # 올리스나르덴
+    "#FK",  # 프랭크뮬러
+    "#RU",  # 로저드뷔
+    "#JE",  # 예거르쿨트르
+    "#TH",  # 태그호이어
+    "#CP",  # 쇼파드
+    "#SM",  # 쇼메
+])
+
+
 def classify_category(
     product_name: str,
     source_band: str,
@@ -30,7 +53,8 @@ def classify_category(
 
     분류 우선순위:
     1. category_keywords에서 키워드 매칭 (우선순위: bag > watch > wallet > shoes > outer > top > bottom > accessory)
-    2. 매칭 없으면 → etc
+    2. 브랜드 기반 폴백 (시계 브랜드 → watch)
+    3. 매칭 없으면 → etc
 
     Note: golf_brand_tags 파라미터는 하위 호환성을 위해 유지하지만 무시됨.
     """
@@ -40,6 +64,10 @@ def classify_category(
         for kw in keywords:
             if kw.lower() in text:
                 return cat_key
+
+    # 브랜드 기반 폴백: 시계 전용 브랜드는 키워드 없어도 watch
+    if brand_tag in _WATCH_BRAND_TAGS:
+        return "watch"
 
     return "etc"
 
