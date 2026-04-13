@@ -42,21 +42,23 @@ def load_settings():
         return yaml.safe_load(f)
 
 
-def resolve_wc_category(category, product_name, wc_cat_config):
-    """마진 카테고리 + 상품명 → WC 카테고리 ID."""
-    cat_conf = wc_cat_config.get(category, {})
+def resolve_wc_category(category, product_name, wc_cat_config, gender="male"):
+    """세분화 카테고리 + 성별 → WC 카테고리 ID."""
+    if category == "bag":
+        return wc_cat_config.get("bag", 85)
+    elif category == "watch":
+        return wc_cat_config.get("watch", 86)
+    elif category == "accessory":
+        return wc_cat_config.get("accessory", 89)
 
-    if category == "bag_watch":
-        watch_keywords = cat_conf.get("watch_keywords", ["시계", "워치"])
-        for kw in watch_keywords:
-            if kw in product_name:
-                return cat_conf.get("watch_id", 86)
-        return cat_conf.get("bag_id", 85)
-    elif category == "outer":
-        return cat_conf.get("id", 78)
-    else:
-        etc_conf = wc_cat_config.get("etc", {})
-        return etc_conf.get("id", 89)
+    if category in ("outer", "top", "bottom", "golf"):
+        gender_conf = wc_cat_config.get(gender, {})
+        if isinstance(gender_conf, dict):
+            cat_id = gender_conf.get(category)
+            if cat_id:
+                return cat_id
+
+    return wc_cat_config.get("etc", 89)
 
 
 def convert_brand_name(brand_tag, product_name, brand_map):
@@ -176,8 +178,8 @@ def main():
                 update_data["short_description"] = new_name
                 has_change = True
 
-            # 2) 카테고리 매핑
-            wc_cat_id = resolve_wc_category(category, product_name, wc_cat_config)
+            # 2) 카테고리 매핑 (성별 정보 없이 기본 male)
+            wc_cat_id = resolve_wc_category(category, product_name, wc_cat_config, gender="male")
             update_data["categories"] = [{"id": wc_cat_id}]
             has_change = True
 

@@ -11,7 +11,7 @@ from src.config import load_config
 from src.database import Database
 from src.band_scraper import BandScraper
 from src.content_parser import parse_post, ParseError
-from src.margin_engine import calculate_sell_price, classify_category
+from src.margin_engine import calculate_sell_price, classify_category, classify_gender
 from src.wc_uploader import WooCommerceUploader
 from src.auto_delete import auto_delete_old_products
 
@@ -115,7 +115,14 @@ def main():
                     category = classify_category(
                         product.product_name,
                         product.source_band,
-                        config["category_keywords"]
+                        config["category_keywords"],
+                        brand_tag=product.brand_tag,
+                        golf_brand_tags=config.get("golf_brand_tags", []),
+                    )
+
+                    gender = classify_gender(
+                        product.sizes,
+                        config.get("gender_classification", {}),
                     )
 
                     sell_price, margin = calculate_sell_price(
@@ -139,7 +146,8 @@ def main():
                         category=category,
                         photo_urls=photo_urls,
                         band_key=post["_band_key"],
-                        post_key=post["post_key"]
+                        post_key=post["post_key"],
+                        gender=gender,
                     )
 
                     if result == "created":

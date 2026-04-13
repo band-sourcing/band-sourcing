@@ -49,24 +49,31 @@ class WooCommerceUploader:
 
     # ── WC 카테고리 매핑 ──
 
-    def _resolve_wc_category(self, category: str, product_name: str) -> int:
+    def _resolve_wc_category(self, category: str, product_name: str, gender: str = "male") -> int:
         """
-        마진 카테고리 + 상품명 -> WC 카테고리 ID.
-        bag_watch는 시계 키워드로 bag/watch 세분화.
-        """
-        cat_conf = self._wc_cat_config.get(category, {})
+        세분화된 카테고리(8종) + 성별 → WC 카테고리 ID.
 
-        if category == "bag_watch":
-            watch_keywords = cat_conf.get("watch_keywords", ["시계", "워치"])
-            for kw in watch_keywords:
-                if kw in product_name:
-                    return cat_conf.get("watch_id", 86)
-            return cat_conf.get("bag_id", 85)
-        elif category == "outer":
-            return cat_conf.get("id", 78)
-        else:
-            etc_conf = self._wc_cat_config.get("etc", {})
-            return etc_conf.get("id", 89)
+        - bag/watch/accessory/etc → 성별 무관 (독립 카테고리)
+        - outer/top/bottom/golf → 성별에 따라 남성/여성 하위 카테고리
+        """
+        # 성별 무관 카테고리
+        if category == "bag":
+            return self._wc_cat_config.get("bag", 85)
+        elif category == "watch":
+            return self._wc_cat_config.get("watch", 86)
+        elif category == "accessory":
+            return self._wc_cat_config.get("accessory", 89)
+
+        # 성별 기반 카테고리 (outer / top / bottom / golf)
+        if category in ("outer", "top", "bottom", "golf"):
+            gender_conf = self._wc_cat_config.get(gender, {})
+            if isinstance(gender_conf, dict):
+                cat_id = gender_conf.get(category)
+                if cat_id:
+                    return cat_id
+
+        # fallback → etc
+        return self._wc_cat_config.get("etc", 89)
 
     # ── Description 빌드 ──
 
@@ -100,14 +107,14 @@ class WooCommerceUploader:
 
         return '\n'.join(parts)
 
-    def _build_product_data(self, product: ParsedProduct, sell_price: int, photo_urls: list[str], category: str = 'etc') -> dict:
+    def _build_product_data(self, product: ParsedProduct, sell_price: int, photo_urls: list[str], category: str = 'etc', gender: str = 'male') -> dict:
         images = []
         if photo_urls:
             images.append({"src": photo_urls[0], "position": 0})
 
         name = format_product_name(product.brand_name_en, product.product_name)
 
-        wc_cat_id = self._resolve_wc_category(category, product.product_name)
+        wc_cat_id = self._resolve_wc_category(category, product.product_name, gender)
 
         return {
             "name": name,
@@ -145,7 +152,8 @@ class WooCommerceUploader:
         category: str,
         photo_urls: list[str],
         band_key: str,
-        post_key: str
+        post_key: str,
+        gender: str = "male",
     ) -> str:
         if not photo_urls and self.no_image_mode == "skip":
             logger.info(f"  스킵(이미지없음): {product.brand_tag} {product.product_name}")
@@ -192,7 +200,7 @@ class WooCommerceUploader:
                     logger.error(f"WC 가격 업데이트 실패: {resp.status_code} {resp.text}")
                     return "error"
 
-        wc_data = self._build_product_data(product, sell_price, photo_urls, category)
+        wc_data = self._build_product_data(product, sell_price, photo_urls, category, gender)
 
         resp = self.api.post("products", wc_data)
 
