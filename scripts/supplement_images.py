@@ -162,15 +162,20 @@ def main():
         db.close()
         return
 
-    scraper = BandScraper()
+    scraper = BandScraper(
+        naver_id=os.getenv("NAVER_ID"),
+        naver_pw=os.getenv("NAVER_PW"),
+        cutoff_date="2026-02-01",
+    )
     try:
-        scraper.login()
+        if not scraper._load_session() or not scraper._is_session_valid():
+            scraper._login_naver()
+            scraper._save_session()
     except Exception as e:
         logger.error(f"밴드 로그인 실패: {e}")
         scraper.close()
         db.close()
         return
-
     updated = 0
     failed = 0
 
