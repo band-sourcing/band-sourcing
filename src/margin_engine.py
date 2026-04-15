@@ -47,6 +47,7 @@ def classify_category(
     category_keywords: dict,
     brand_tag: str = "",
     golf_brand_tags: list | None = None,
+    keyword_exclusions: dict | None = None,
 ) -> str:
     """
     상품명 기반으로 카테고리 분류.
@@ -56,13 +57,24 @@ def classify_category(
     2. 브랜드 기반 폴백 (시계 브랜드 → watch)
     3. 매칭 없으면 → etc
 
+    keyword_exclusions: 키워드 매칭 시 제외어 체크.
+      예: {"shoes": {"부츠": ["부츠컷"]}} → "부츠"가 매칭됐지만 "부츠컷"이 있으면 skip
+
     Note: golf_brand_tags 파라미터는 하위 호환성을 위해 유지하지만 무시됨.
     """
     text = product_name.lower()
+    exclusions = keyword_exclusions or {}
+
     for cat_key in _CATEGORY_PRIORITY:
         keywords = category_keywords.get(cat_key, [])
+        cat_exclusions = exclusions.get(cat_key, {})
         for kw in keywords:
-            if kw.lower() in text:
+            kw_lower = kw.lower()
+            if kw_lower in text:
+                # 제외어 체크
+                exclude_list = cat_exclusions.get(kw, [])
+                if exclude_list and any(ex.lower() in text for ex in exclude_list):
+                    continue
                 return cat_key
 
     # 브랜드 기반 폴백: 시계 전용 브랜드는 키워드 없어도 watch

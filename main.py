@@ -118,6 +118,7 @@ def main():
                         config["category_keywords"],
                         brand_tag=product.brand_tag,
                         golf_brand_tags=config.get("golf_brand_tags", []),
+                        keyword_exclusions=config.get("keyword_exclusions", {}),
                     )
 
                     gender = classify_gender(

@@ -95,6 +95,7 @@ def main():
     gender_config = settings.get("gender_classification", {})
     wc_cat_config = settings.get("wc_categories", {})
     margin_config = settings.get("margin", {})
+    keyword_exclusions = settings.get("keyword_exclusions", {})
 
     api = API(
         url=os.getenv("WC_SITE_URL"),
@@ -138,6 +139,7 @@ def main():
         new_category = classify_category(
             product_name, "", category_keywords,
             brand_tag=brand_tag,
+            keyword_exclusions=keyword_exclusions,
         )
 
         # 새 마진 계산
