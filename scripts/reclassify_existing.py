@@ -75,6 +75,7 @@ def extract_sizes_from_wc(api, wc_product_id: int) -> list[str]:
 def main():
     parser = argparse.ArgumentParser(description="기존 WC 상품 카테고리 재분류 + 마진 재계산")
     parser.add_argument("--dry-run", action="store_true", help="실제 업데이트 없이 결과만 출력")
+    parser.add_argument("--force-wc-cat", action="store_true", help="카테고리/가격 변경 없어도 WC 카테고리 ID를 강제 재설정")
     args = parser.parse_args()
 
     settings = load_settings()
@@ -142,14 +143,17 @@ def main():
 
         cat_changed = old_category != new_category
         price_changed = old_sell != new_sell
+        needs_update = cat_changed or price_changed or args.force_wc_cat
 
         if args.dry_run:
-            if cat_changed or price_changed:
+            if needs_update:
                 changes = []
                 if cat_changed:
                     changes.append(f"cat: {old_category}→{new_category}")
                 if price_changed:
                     changes.append(f"price: {old_sell:,}→{new_sell:,}")
+                if args.force_wc_cat and not cat_changed and not price_changed:
+                    changes.append(f"force WC cat→{new_wc_cat_id}")
                 logger.info(
                     f"  [{idx+1}/{total}] {brand_tag} {product_name[:30]} | "
                     f"{' | '.join(changes)} | WC cat={new_wc_cat_id}"
@@ -160,12 +164,13 @@ def main():
                     stats["price_changed"] += 1
             else:
                 stats["unchanged"] += 1
-            # rate limit
-            if (idx + 1) % 20 == 0:
-                time.sleep(1)
             continue
 
         # 실제 업데이트 준비
+        if not needs_update:
+            stats["unchanged"] += 1
+            continue
+
         update_data = {"id": wc_id, "categories": [{"id": new_wc_cat_id}]}
         if price_changed:
             update_data["regular_price"] = str(new_sell)
