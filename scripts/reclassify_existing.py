@@ -26,7 +26,7 @@ from woocommerce import API
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from src.margin_engine import classify_category, classify_gender, calculate_sell_price
+from src.margin_engine import classify_category, calculate_sell_price
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,21 +47,8 @@ def load_settings():
 
 
 def resolve_wc_category(category: str, gender: str, wc_cat_config: dict) -> int:
-    """카테고리 + 성별 → WC 카테고리 ID."""
-    # 성별 무관 카테고리
-    _GENDER_FREE = ("bag", "watch", "accessory", "wallet", "shoes")
-    if category in _GENDER_FREE:
-        return wc_cat_config.get(category, wc_cat_config.get("etc", 89))
-
-    # 성별 기반 카테고리 (outer / top / bottom)
-    if category in ("outer", "top", "bottom"):
-        gender_conf = wc_cat_config.get(gender, {})
-        if isinstance(gender_conf, dict):
-            cat_id = gender_conf.get(category)
-            if cat_id:
-                return cat_id
-
-    return wc_cat_config.get("etc", 89)
+    """카테고리 → WC 카테고리 ID (성별 구분 제거)."""
+    return wc_cat_config.get(category, wc_cat_config.get("etc", 89))
 
 
 def extract_sizes_from_wc(api, wc_product_id: int) -> list[str]:
@@ -92,7 +79,6 @@ def main():
 
     settings = load_settings()
     category_keywords = settings.get("category_keywords", {})
-    gender_config = settings.get("gender_classification", {})
     wc_cat_config = settings.get("wc_categories", {})
     margin_config = settings.get("margin", {})
     keyword_exclusions = settings.get("keyword_exclusions", {})
@@ -145,9 +131,8 @@ def main():
         # 새 마진 계산
         new_sell, new_margin = calculate_sell_price(cost_price, new_category, margin_config)
 
-        # 성별 분류 (키워드 + WC description에서 사이즈 추출)
-        sizes = extract_sizes_from_wc(api, wc_id)
-        gender = classify_gender(sizes, gender_config, product_name=product_name)
+        # 성별 분류 제거 — gender는 하위 호환용 "male" 고정
+        gender = "male"
 
         # WC 카테고리 ID
         new_wc_cat_id = resolve_wc_category(new_category, gender, wc_cat_config)
@@ -167,7 +152,7 @@ def main():
                     changes.append(f"price: {old_sell:,}→{new_sell:,}")
                 logger.info(
                     f"  [{idx+1}/{total}] {brand_tag} {product_name[:30]} | "
-                    f"{' | '.join(changes)} ({gender}) | WC cat={new_wc_cat_id}"
+                    f"{' | '.join(changes)} | WC cat={new_wc_cat_id}"
                 )
                 if cat_changed:
                     stats["cat_changed"] += 1

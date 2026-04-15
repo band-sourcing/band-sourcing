@@ -501,56 +501,15 @@ brand_map:
   "#ZN": "제냐"
 
 wc_categories:
-  male:
-    outer: 78
-    top: 79
-    bottom: 82
-  female:
-    outer: 77
-    top: 80
-    bottom: 81
+  outer: 78
+  top: 79
+  bottom: 82
   bag: 85
   watch: 86
   accessory: 89
   wallet: 83
   shoes: 84
   etc: 31          # Step4 FIX-B: 미분류 (accessory 89와 분리)
-
-# 성별 분류용 사이즈 패턴
-gender_classification:
-  # Step4 FIX-C: 상품명 키워드 기반 성별 판정 (사이즈보다 우선)
-  female_keywords:
-    - "우먼"
-    - "women"
-    - "woman"
-    - "여성"
-    - "여성용"
-    - "레이디"
-    - "걸즈"
-  male_keywords:
-    - "맨즈"
-    - "men"
-    - "남성"
-  female_sizes:
-    - "44"
-    - "55"
-    - "66"
-    - "77"
-    - "88"
-  male_sizes:
-    - "90"
-    - "95"
-    - "100"
-    - "105"
-    - "110"
-    - "115"
-    - "120"
-    - "30"
-    - "32"
-    - "34"
-    - "36"
-    - "38"
-  default_gender: "male"  # 판별 불가 시 남성
 
 images:
   notice_url: "https://choonsik1.com/wp-content/uploads/2026/04/notice-banner.webp"
