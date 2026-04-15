@@ -50,32 +50,42 @@ def classify_category(
     keyword_exclusions: dict | None = None,
 ) -> str:
     """
-    상품명 기반으로 카테고리 분류.
+    상품명 기반으로 카테고리 분류 — **last-match 방식**.
 
-    분류 우선순위:
-    1. category_keywords에서 키워드 매칭 (우선순위: bag > watch > wallet > shoes > outer > top > bottom > accessory)
-    2. 브랜드 기반 폴백 (시계 브랜드 → watch)
-    3. 매칭 없으면 → etc
+    명품 상품명은 "수식어(소재/라인) + 상품유형" 구조이므로,
+    상품명에서 가장 뒤에 위치한 키워드의 카테고리를 반환한다.
 
-    keyword_exclusions: 키워드 매칭 시 제외어 체크.
-      예: {"shoes": {"부츠": ["부츠컷"]}} → "부츠"가 매칭됐지만 "부츠컷"이 있으면 skip
+    예:
+      "캐비어 스니커즈" → 스니커즈(shoes)가 뒤 → shoes
+      "백 로* 반팔 티셔츠" → 티셔츠(top)가 뒤 → top
+      "데님 볼캡 모자" → 모자(accessory)가 뒤 → accessory
 
-    Note: golf_brand_tags 파라미터는 하위 호환성을 위해 유지하지만 무시됨.
+    동일 위치에 여러 키워드가 매칭될 경우 _CATEGORY_PRIORITY 순서가 타이브레이커.
+
+    keyword_exclusions: 하위 호환성을 위해 파라미터 유지하지만 무시됨.
+    golf_brand_tags: 하위 호환성을 위해 파라미터 유지하지만 무시됨.
     """
     text = product_name.lower()
-    exclusions = keyword_exclusions or {}
 
-    for cat_key in _CATEGORY_PRIORITY:
+    best_pos = -1
+    best_cat = None
+    best_priority = len(_CATEGORY_PRIORITY)  # 높을수록 낮은 우선순위
+
+    for priority_idx, cat_key in enumerate(_CATEGORY_PRIORITY):
         keywords = category_keywords.get(cat_key, [])
-        cat_exclusions = exclusions.get(cat_key, {})
         for kw in keywords:
             kw_lower = kw.lower()
-            if kw_lower in text:
-                # 제외어 체크
-                exclude_list = cat_exclusions.get(kw, [])
-                if exclude_list and any(ex.lower() in text for ex in exclude_list):
-                    continue
-                return cat_key
+            pos = text.rfind(kw_lower)
+            if pos == -1:
+                continue
+            # 가장 뒤에 위치한 키워드 우선, 동일 위치면 _CATEGORY_PRIORITY 순서
+            if pos > best_pos or (pos == best_pos and priority_idx < best_priority):
+                best_pos = pos
+                best_cat = cat_key
+                best_priority = priority_idx
+
+    if best_cat is not None:
+        return best_cat
 
     # 브랜드 기반 폴백: 시계 전용 브랜드는 키워드 없어도 watch
     if brand_tag in _WATCH_BRAND_TAGS:

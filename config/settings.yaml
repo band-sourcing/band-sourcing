@@ -292,9 +292,7 @@ category_keywords:
 
 # 키워드 매칭 시 제외어: 상위 카테고리 키워드가 하위 카테고리 상품을 잡아먹는 것 방지
 # 예: "부츠"(shoes)가 "부츠컷 데님"(bottom)을 잡아먹지 않도록
-keyword_exclusions:
-  shoes:
-    "부츠": ["부츠컷"]
+keyword_exclusions: {}
 
 brand_map:
   "#AA": "아페쎄(A.P.C)"
