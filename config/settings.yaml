@@ -514,6 +514,25 @@ wc_categories:
 images:
   notice_url: "https://choonsik1.com/wp-content/uploads/2026/04/notice-banner.webp"
 
+duplicate:
+  bag:
+    enabled: true
+    max_count: 2
+  watch:
+    enabled: true
+  outer:
+    enabled: true
+  top:
+    enabled: true
+  bottom:
+    enabled: false
+  accessory:
+    enabled: false
+  wallet:
+    enabled: false
+  shoes:
+    enabled: false
+
 auto_delete:
   enabled: true
   max_products: 8000

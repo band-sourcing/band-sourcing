@@ -3,6 +3,11 @@ import json
 from datetime import datetime
 
 
+def _normalize_set_part(set_part) -> str:
+    """set_part를 항상 빈 문자열로 정규화 (NULL 방지 → UNIQUE 제약 보장)."""
+    return set_part if set_part else ""
+
+
 class Database:
     def __init__(self, db_path: str):
         self.db_path = db_path
@@ -18,7 +23,7 @@ class Database:
                 id                INTEGER PRIMARY KEY AUTOINCREMENT,
                 brand_tag         TEXT NOT NULL,
                 product_name      TEXT NOT NULL,
-                set_part          TEXT DEFAULT NULL,
+                set_part          TEXT NOT NULL DEFAULT '',
                 cost_price        INTEGER NOT NULL,
                 sell_price        INTEGER NOT NULL,
                 margin_applied    INTEGER NOT NULL,
@@ -27,7 +32,7 @@ class Database:
                 post_key          TEXT NOT NULL,
                 category          TEXT NOT NULL,
                 created_at        DATETIME DEFAULT (datetime('now', 'localtime')),
-                UNIQUE(brand_tag, product_name, set_part)
+                UNIQUE(brand_tag, product_name, set_part, cost_price)
             )
         """)
 
@@ -36,7 +41,7 @@ class Database:
                 id                INTEGER PRIMARY KEY AUTOINCREMENT,
                 brand_tag         TEXT NOT NULL,
                 product_name      TEXT NOT NULL,
-                set_part          TEXT DEFAULT NULL,
+                set_part          TEXT NOT NULL DEFAULT '',
                 cost_price        INTEGER NOT NULL,
                 post_key          TEXT NOT NULL,
                 seen_at           DATETIME DEFAULT (datetime('now', 'localtime'))
@@ -77,15 +82,50 @@ class Database:
     # ── 상품 CRUD ──
 
     def find_product(self, brand_tag: str, product_name: str, set_part: str = None) -> dict | None:
+        """기존 호환: brand_tag + product_name + set_part 로 첫 번째 매칭 반환."""
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT * FROM products WHERE brand_tag = ? AND product_name = ? AND set_part IS ?",
-            (brand_tag, product_name, set_part)
+            "SELECT * FROM products WHERE brand_tag = ? AND product_name = ? AND set_part = ?",
+            (brand_tag, product_name, _normalize_set_part(set_part))
         )
         row = cursor.fetchone()
         return dict(row) if row else None
 
+    def find_product_exact(self, brand_tag: str, product_name: str,
+                           set_part: str = None, cost_price: int = 0) -> dict | None:
+        """중복 허용 모드용: cost_price까지 포함한 정확한 매칭."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT * FROM products WHERE brand_tag = ? AND product_name = ? "
+            "AND set_part = ? AND cost_price = ?",
+            (brand_tag, product_name, _normalize_set_part(set_part), cost_price)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def count_product_variants(self, brand_tag: str, product_name: str,
+                               set_part: str = None) -> int:
+        """동일 상품(brand_tag+product_name+set_part)의 등록 개수."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) FROM products WHERE brand_tag = ? AND product_name = ? AND set_part = ?",
+            (brand_tag, product_name, _normalize_set_part(set_part))
+        )
+        return cursor.fetchone()[0]
+
+    def list_product_variants(self, brand_tag: str, product_name: str,
+                              set_part: str = None) -> list[dict]:
+        """동일 상품의 모든 가격 변형 조회 (cost_price ASC)."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT * FROM products WHERE brand_tag = ? AND product_name = ? "
+            "AND set_part = ? ORDER BY cost_price ASC",
+            (brand_tag, product_name, _normalize_set_part(set_part))
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
     def insert_product(self, **kwargs) -> int:
+        kwargs["set_part"] = _normalize_set_part(kwargs.get("set_part"))
         cursor = self.conn.cursor()
         cursor.execute("""
             INSERT INTO products (brand_tag, product_name, set_part, cost_price,
@@ -129,15 +169,15 @@ class Database:
         cursor.execute("""
             INSERT INTO price_history (brand_tag, product_name, set_part, cost_price, post_key)
             VALUES (?, ?, ?, ?, ?)
-        """, (brand_tag, product_name, set_part, cost_price, post_key))
+        """, (brand_tag, product_name, _normalize_set_part(set_part), cost_price, post_key))
         self.conn.commit()
 
     def get_price_history(self, brand_tag: str, product_name: str,
                           set_part: str = None) -> list[int]:
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT cost_price FROM price_history WHERE brand_tag = ? AND product_name = ? AND set_part IS ?",
-            (brand_tag, product_name, set_part)
+            "SELECT cost_price FROM price_history WHERE brand_tag = ? AND product_name = ? AND set_part = ?",
+            (brand_tag, product_name, _normalize_set_part(set_part))
         )
         return [row[0] for row in cursor.fetchall()]
 
