@@ -182,7 +182,13 @@ class BandScraper:
             self._page.goto(f"{BAND_HOME}/feed", wait_until="domcontentloaded", timeout=15000)
             time.sleep(2)
             url = self._page.url
-            if "auth.band.us" in url or "login" in url:
+            if "auth.band.us" in url or "login" in url or "auth" in url:
+                logger.info(f"세션 무효 (리다이렉트 URL: {url})")
+                return False
+            # 피드 페이지 내 실제 콘텐츠 존재 확인
+            body_text_len = len(self._page.inner_text("body").strip())
+            if body_text_len < 200:
+                logger.info(f"세션 무효 (페이지 콘텐츠 부족: {body_text_len}자)")
                 return False
             return True
         except Exception:
@@ -335,6 +341,21 @@ class BandScraper:
 
     # ── 게시글 수집 (fetch_all_posts 호환) ──
 
+    def _is_redirected_to_login(self) -> bool:
+        """현재 페이지가 로그인 페이지로 리다이렉트됐는지 확인."""
+        url = self._page.url
+        if any(kw in url for kw in ("auth.band.us", "/login", "login_page")):
+            return True
+        # 콘텐츠가 거의 없으면 빈 페이지 (세션 만료 후 빈 응답)
+        try:
+            body_len = len(self._page.inner_text("body").strip())
+            if body_len < 100:
+                logger.debug(f"페이지 콘텐츠 부족 ({body_len}자) -> 로그인 필요 의심")
+                return True
+        except Exception:
+            return True
+        return False
+
     def fetch_all_posts(self, band_key: str) -> list[dict]:
         """
         밴드의 게시글을 스크롤하면서 수집.
@@ -346,6 +367,17 @@ class BandScraper:
         band_url = f"{BAND_HOME}/band/{band_key}"
         self._page.goto(band_url, wait_until="domcontentloaded", timeout=30000)
         time.sleep(3)
+
+        # 로그인 리다이렉트 감지 -> 재로그인
+        if self._is_redirected_to_login():
+            logger.warning(f"밴드 {band_key} 진입 시 로그인 리다이렉트 감지 -> 재로그인")
+            self._logged_in = False
+            self._login_naver()
+            self._page.goto(band_url, wait_until="domcontentloaded", timeout=30000)
+            time.sleep(3)
+            if self._is_redirected_to_login():
+                logger.error(f"밴드 {band_key}: 재로그인 후에도 접근 불가")
+                return []
 
         all_posts = []
         seen_keys = set()

@@ -189,6 +189,8 @@ def scraper():
         viewport={"width": 1280, "height": 800},
     )
     s._page = s._context.new_page()
+    # 테스트 서버는 band.us가 아니므로 로그인 리다이렉트 감지 비활성화
+    s._is_redirected_to_login = lambda: False
     yield s
     s.close()
 
