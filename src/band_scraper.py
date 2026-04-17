@@ -38,6 +38,10 @@ BAND_LOGIN = "https://auth.band.us/login_page"
 class BandScraper:
     """Playwright 기반 밴드 스크래퍼. BandFetcher와 동일 인터페이스."""
 
+    # execution context 파괴 시 retry 설정
+    MAX_EVAL_RETRIES = 3
+    EVAL_RETRY_DELAY = 2.0
+
     def __init__(
         self,
         naver_id: str,
@@ -60,6 +64,83 @@ class BandScraper:
         self._context: BrowserContext | None = None
         self._page: Page | None = None
         self._logged_in = False
+
+    # ── 안전한 JS 실행 (context 파괴 대응) ──
+
+    def _safe_evaluate(self, expression: str, retries: int = None):
+        """
+        page.evaluate()를 실행하되, execution context 파괴 시 재시도.
+        밴드 SPA가 스크롤 중 네비게이션을 트리거하면 context가 파괴될 수 있다.
+        """
+        max_retries = retries or self.MAX_EVAL_RETRIES
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                return self._page.evaluate(expression)
+            except Exception as e:
+                err_msg = str(e).lower()
+                if "execution context" in err_msg or "destroyed" in err_msg or "navigat" in err_msg:
+                    last_error = e
+                    logger.warning(
+                        f"Execution context 파괴 감지 (시도 {attempt + 1}/{max_retries}): {e}"
+                    )
+                    self._wait_for_stable_context()
+                else:
+                    raise
+
+        logger.error(f"_safe_evaluate 최종 실패 ({max_retries}회 재시도 후): {last_error}")
+        raise last_error
+
+    def _wait_for_stable_context(self):
+        """
+        네비게이션 완료 후 안정적인 context가 확보될 때까지 대기.
+        밴드 SPA 내부 네비게이션(pushState) 또는 full navigation 모두 대응.
+        """
+        try:
+            # 진행 중인 네비게이션 완료 대기
+            self._page.wait_for_load_state("domcontentloaded", timeout=10000)
+        except Exception:
+            pass
+
+        time.sleep(self.EVAL_RETRY_DELAY)
+
+        # context가 실제로 살아있는지 간단한 JS로 확인
+        for probe in range(3):
+            try:
+                self._page.evaluate("1 + 1")
+                return
+            except Exception:
+                time.sleep(1)
+
+        logger.warning("context 안정화 실패 -> 현재 URL로 강제 reload")
+        try:
+            current_url = self._page.url
+            self._page.goto(current_url, wait_until="domcontentloaded", timeout=15000)
+            time.sleep(2)
+        except Exception as e:
+            logger.error(f"reload 실패: {e}")
+
+    def _safe_goto(self, url: str, timeout: int = 15000):
+        """
+        page.goto()를 실행하되, context 파괴 시 재시도.
+        상세 페이지 방문(2-pass/3-pass)에서 사용.
+        """
+        for attempt in range(self.MAX_EVAL_RETRIES):
+            try:
+                self._page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+                time.sleep(1.5)
+                return
+            except Exception as e:
+                err_msg = str(e).lower()
+                if "execution context" in err_msg or "destroyed" in err_msg:
+                    logger.warning(
+                        f"goto context 파괴 (시도 {attempt + 1}): {url}"
+                    )
+                    self._wait_for_stable_context()
+                else:
+                    raise
+        raise Exception(f"_safe_goto 최종 실패: {url}")
 
     # ── 세션 관리 ──
 
@@ -271,9 +352,32 @@ class BandScraper:
         no_new_count = 0
         max_scroll_attempts = 100
 
+        context_error_count = 0
+        MAX_CONTEXT_ERRORS = 5
+
         for scroll_attempt in range(max_scroll_attempts):
-            post_elements = self._page.locator('article._postMainWrap')
-            current_count = post_elements.count()
+            # context 파괴 후 locator 재취득 필요
+            try:
+                post_elements = self._page.locator('article._postMainWrap')
+                current_count = post_elements.count()
+            except Exception as e:
+                err_msg = str(e).lower()
+                if "execution context" in err_msg or "destroyed" in err_msg:
+                    context_error_count += 1
+                    logger.warning(
+                        f"스크롤 중 context 파괴 (#{context_error_count}) -> 복구 시도"
+                    )
+                    if context_error_count > MAX_CONTEXT_ERRORS:
+                        logger.error("context 파괴 횟수 초과 -> 수집 중단")
+                        break
+                    self._wait_for_stable_context()
+                    # 밴드 피드가 다른 페이지로 이동했을 수 있으므로 URL 확인
+                    if f"/band/{band_key}" not in self._page.url:
+                        logger.info("피드 이탈 감지 -> 밴드 피드로 복귀")
+                        self._page.goto(band_url, wait_until="domcontentloaded", timeout=30000)
+                        time.sleep(3)
+                    continue
+                raise
 
             new_found = False
             stop_scrolling = False
@@ -299,6 +403,11 @@ class BandScraper:
                     new_found = True
 
                 except Exception as e:
+                    err_msg = str(e).lower()
+                    if "execution context" in err_msg or "destroyed" in err_msg:
+                        logger.warning(f"게시글 파싱 중 context 파괴 (index {i}) -> 이번 스크롤 스킵")
+                        self._wait_for_stable_context()
+                        break
                     logger.debug(f"게시글 파싱 실패 (index {i}): {e}")
                     continue
 
@@ -314,7 +423,13 @@ class BandScraper:
             else:
                 no_new_count = 0
 
-            self._page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            # 안전한 스크롤 실행
+            try:
+                self._safe_evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            except Exception as e:
+                logger.warning(f"스크롤 실패 -> 밴드 피드 복귀: {e}")
+                self._page.goto(band_url, wait_until="domcontentloaded", timeout=30000)
+                time.sleep(3)
             time.sleep(2)
 
         logger.info(f"밴드 {band_key}: 1차 수집 {len(all_posts)}개")
@@ -329,8 +444,7 @@ class BandScraper:
             if not post_url:
                 continue
             try:
-                self._page.goto(post_url, wait_until="domcontentloaded", timeout=15000)
-                time.sleep(1.5)
+                self._safe_goto(post_url)
 
                 detail_selectors = [
                     'p.txtBody',
@@ -343,13 +457,20 @@ class BandScraper:
                 ]
 
                 for sel in detail_selectors:
-                    text_el = self._page.locator(sel).first
-                    if text_el.count() > 0:
-                        text = text_el.inner_text().strip()
-                        if text and len(text) > 3 and PRICE_RE.search(text):
-                            post["content"] = text
-                            logger.debug(f"  [{idx}] 상세 보충 성공: {len(text)}자")
+                    try:
+                        text_el = self._page.locator(sel).first
+                        if text_el.count() > 0:
+                            text = text_el.inner_text().strip()
+                            if text and len(text) > 3 and PRICE_RE.search(text):
+                                post["content"] = text
+                                logger.debug(f"  [{idx}] 상세 보충 성공: {len(text)}자")
+                                break
+                    except Exception as e:
+                        err_msg = str(e).lower()
+                        if "execution context" in err_msg or "destroyed" in err_msg:
+                            self._wait_for_stable_context()
                             break
+                        continue
 
             except Exception as e:
                 logger.debug(f"  [{idx}] 상세 진입 실패: {e}")
@@ -370,8 +491,7 @@ class BandScraper:
                 continue
             old_count = len(post["photos"])
             try:
-                self._page.goto(post_url, wait_until="domcontentloaded", timeout=15000)
-                time.sleep(1.5)
+                self._safe_goto(post_url)
 
                 # 상세 페이지의 게시글 컨테이너에서 이미지 추출
                 detail_el = self._page.locator('article._postMainWrap').first
