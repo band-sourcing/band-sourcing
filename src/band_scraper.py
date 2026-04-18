@@ -148,10 +148,15 @@ class BandScraper:
         """쿠키를 파일에 저장하여 재로그인 방지."""
         if self._context:
             cookies = self._context.cookies()
+            # Chromium은 SameSite=None 쿠키에 secure=true를 요구
+            # band.us 쿠키가 secure=false로 내려오면 다음 로드 시 적용이 안 되므로 강제 보정
+            for cookie in cookies:
+                if cookie.get("sameSite") == "None":
+                    cookie["secure"] = True
             os.makedirs(os.path.dirname(self.session_path), exist_ok=True)
             with open(self.session_path, "w", encoding="utf-8") as f:
-                json.dump(cookies, f, ensure_ascii=False)
-            logger.info(f"세션 저장 완료: {self.session_path}")
+                json.dump(cookies, f, ensure_ascii=False, indent=2)
+            logger.info(f"세션 저장 완료: {self.session_path} ({len(cookies)}개 쿠키)")
 
     def _load_session(self) -> bool:
         """저장된 세션 쿠키 로드. 성공 시 True."""
@@ -160,6 +165,10 @@ class BandScraper:
         try:
             with open(self.session_path, "r", encoding="utf-8") as f:
                 cookies = json.load(f)
+            # SameSite=None 쿠키 secure 보정 (수동 편집된 JSON 대응)
+            for cookie in cookies:
+                if cookie.get("sameSite") == "None":
+                    cookie["secure"] = True
             self._context = self._browser.new_context(
                 user_agent=(
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -170,7 +179,7 @@ class BandScraper:
             )
             self._context.add_cookies(cookies)
             self._page = self._context.new_page()
-            logger.info("저장된 세션 로드 완료")
+            logger.info(f"저장된 세션 로드 완료 ({len(cookies)}개 쿠키)")
             return True
         except Exception as e:
             logger.warning(f"세션 로드 실패: {e}")
@@ -368,16 +377,14 @@ class BandScraper:
         self._page.goto(band_url, wait_until="domcontentloaded", timeout=30000)
         time.sleep(3)
 
-        # 로그인 리다이렉트 감지 -> 재로그인
+        # 로그인 리다이렉트 감지 -> 세션 만료
         if self._is_redirected_to_login():
-            logger.warning(f"밴드 {band_key} 진입 시 로그인 리다이렉트 감지 -> 재로그인")
-            self._logged_in = False
-            self._login_naver()
-            self._page.goto(band_url, wait_until="domcontentloaded", timeout=30000)
-            time.sleep(3)
-            if self._is_redirected_to_login():
-                logger.error(f"밴드 {band_key}: 재로그인 후에도 접근 불가")
-                return []
+            logger.error(
+                f"밴드 {band_key} 진입 시 로그인 리다이렉트 감지 -> 세션 만료됨. "
+                f"로컬 PC에서 쿠키를 갱신하여 data/band_session.json을 교체해야 합니다."
+            )
+            # headless 환경에서 네이버 자동 로그인은 캡차로 인해 불가능
+            return []
 
         all_posts = []
         seen_keys = set()
@@ -541,6 +548,11 @@ class BandScraper:
         logger.info(f"  이미지 보충 완료: {img_supplemented}/{len(need_images)}개 보충됨")
 
         logger.info(f"밴드 {band_key}: 총 {len(all_posts)}개 게시글 수집")
+
+        # 성공 시 세션 갱신 저장 (서버가 내려준 최신 쿠키 반영)
+        if all_posts:
+            self._save_session()
+
         return all_posts
 
     def _parse_post_element(self, el, band_key: str) -> dict | None:
