@@ -41,6 +41,49 @@ _WATCH_BRAND_TAGS = frozenset([
 ])
 
 
+# 의류천국22 전용 실측치 기반 분류 보조로직에서 사용하는 키워드
+# 상의/하의/아우터 구분은 밴드 본문 내 실측 스펙 키워드로 역추론한다.
+_SIZE_SPEC_BOTTOM_MARKERS = ("허리", "허벅지", "밑위")
+_SIZE_SPEC_TOP_MARKERS = ("어깨", "가슴")
+_SIZE_SPEC_SLEEVE_MARKERS = ("소매", "기장")
+
+
+def _classify_by_size_spec(raw_content: str) -> str | None:
+    """
+    의류천국22 전용 -> 키워드 매칭 실패 시 raw 본문의 실측 스펙으로 카테고리 추정.
+
+    판정 우선순위:
+      1) 하의 -> "허리/허벅지/밑위" 중 1개 이상 등장 (bottom 특이성 100%)
+      2) 상의 -> "어깨" AND "가슴" 둘 다 등장 (top 특이성 99%)
+      3) 그 외 -> None (상위 로직으로 위임)
+
+    실데이터 검증 결과 (의류천국22 493건 기준):
+      - bottom 카테고리의 "허리" 출현율 24.4% vs top/outer는 0%
+      - top 카테고리의 "어깨+가슴" 동시 출현율 18.8% vs outer는 1.6%
+      - etc 84건 중 "어깨+가슴" 보유 24건 -> 대부분 실제 top
+
+    Args:
+        raw_content: 게시글 원본 텍스트 (ParsedProduct.raw_content 사용 전 원본)
+
+    Returns:
+        "bottom" / "top" / None
+    """
+    if not raw_content:
+        return None
+
+    # 1) 하의 판정 - 허리/허벅지/밑위 키워드 존재 (bottom 배타적 키워드)
+    if any(marker in raw_content for marker in _SIZE_SPEC_BOTTOM_MARKERS):
+        return "bottom"
+
+    # 2) 상의 판정 - "어깨" AND "가슴" 둘 다 존재 (단독은 오탐 가능성 있음)
+    has_shoulder = "어깨" in raw_content
+    has_chest = "가슴" in raw_content
+    if has_shoulder and has_chest:
+        return "top"
+
+    return None
+
+
 def classify_category(
     product_name: str,
     source_band: str,
@@ -48,6 +91,7 @@ def classify_category(
     brand_tag: str = "",
     golf_brand_tags: list | None = None,
     keyword_exclusions: dict | None = None,
+    raw_content: str = "",
 ) -> str:
     """
     상품명 기반으로 카테고리 분류 — **last-match 방식**.
@@ -62,8 +106,16 @@ def classify_category(
 
     동일 위치에 여러 키워드가 매칭될 경우 _CATEGORY_PRIORITY 순서가 타이브레이커.
 
-    keyword_exclusions: 하위 호환성을 위해 파라미터 유지하지만 무시됨.
-    golf_brand_tags: 하위 호환성을 위해 파라미터 유지하지만 무시됨.
+    Fallback 체인 (키워드 매칭 실패 시):
+      1) 시계 전용 브랜드 태그면 watch
+      2) source_band이 "의류천국22"이고 raw_content 제공되면
+         실측 스펙 키워드(허리/허벅지 or 어깨+가슴)로 bottom/top 추정
+      3) 모두 실패 시 etc
+
+    Args:
+        raw_content: 게시글 원본 텍스트 (의류천국22 실측치 분류에 사용). 미제공 시 skip.
+        keyword_exclusions: 하위 호환성을 위해 파라미터 유지하지만 무시됨.
+        golf_brand_tags: 하위 호환성을 위해 파라미터 유지하지만 무시됨.
     """
     text = product_name.lower()
 
@@ -90,6 +142,12 @@ def classify_category(
     # 브랜드 기반 폴백: 시계 전용 브랜드는 키워드 없어도 watch
     if brand_tag in _WATCH_BRAND_TAGS:
         return "watch"
+
+    # 의류천국22 전용 폴백: 실측 스펙 키워드로 상의/하의 역추론
+    if source_band == "의류천국22" and raw_content:
+        spec_cat = _classify_by_size_spec(raw_content)
+        if spec_cat is not None:
+            return spec_cat
 
     return "etc"
 
