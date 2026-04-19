@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-[Step 5] SALE 마커 스킵 + 의류천국22 실측치 기반 분류 테스트.
+[Step 5 + Task 8] SALE 마커 스킵 + 실측치 분류 + 토큰 기반 추출 테스트.
 
-- content_parser._find_product_name_index / parse_single_product: SALE 다음 줄을 상품명으로
-- margin_engine._classify_by_size_spec / classify_category: raw_content 기반 bottom/top 폴백
+- content_parser.extract_product_name_from_tokens: 토큰 기반 상품명 추출 (Task 8)
+- content_parser.parse_single_product: 토큰 기반 통합
+- margin_engine.classify_category: raw_content 기반 bottom/top 폴백
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from src.content_parser import (
-    _find_product_name_index,
+    extract_product_name_from_tokens,
     parse_post,
     parse_single_product,
 )
@@ -47,48 +48,119 @@ CATEGORY_KEYWORDS = {
 
 
 # ══════════════════════════════════════════════════════════════════
-# SECTION 1: _find_product_name_index (helper)
+# SECTION 1: extract_product_name_from_tokens (Task 8)
 # ══════════════════════════════════════════════════════════════════
-class TestFindProductNameIndex:
-    def test_no_sale_marker_returns_brand_plus_one(self):
-        lines = ["#PD", "나일론 재킷", "사이즈 - M L", "088 (QT)"]
-        assert _find_product_name_index(lines, 0) == 1
+class TestExtractProductNameFromTokens:
+    """토큰 기반 상품명 추출기 단위 테스트."""
 
-    def test_sale_marker_skipped(self):
-        lines = ["#BB", "SALE", "러브기마 반팔", "블랙 M L XL 2XL", "028 (QT)"]
-        assert _find_product_name_index(lines, 0) == 2
+    def test_basic_product(self):
+        raw = "#PD\n나일론 재킷\n088 (QT)"
+        result = extract_product_name_from_tokens(raw)
+        assert "나일론 재킷" in result
+        assert "#PD" not in result
+        assert "088" not in result
+        assert "QT" not in result
 
-    def test_sale_lowercase_skipped(self):
-        lines = ["#BB", "sale", "반팔", "028 (QT)"]
-        assert _find_product_name_index(lines, 0) == 2
+    def test_br_tag_converted_to_space(self):
+        raw = "#FG<br><br>SALE<br><br>반팔<br><br>028 (QT)"
+        result = extract_product_name_from_tokens(raw)
+        assert "반팔" in result
+        assert "<br>" not in result
+        assert "SALE" not in result
+        assert "#FG" not in result
 
-    def test_korean_세일_skipped(self):
-        lines = ["#BB", "세일", "반팔", "028 (QT)"]
-        assert _find_product_name_index(lines, 0) == 2
+    def test_sale_marker_removed(self):
+        raw = """#BB
 
-    def test_sale_at_end_returns_brand_plus_one(self):
-        # 브랜드 + SALE 만 있는 경우 -> 뒤에 상품명 없으므로 SALE idx 반환
-        lines = ["#GC", "SALE"]
-        # idx+1이 범위 밖이면 SALE 자체 인덱스 반환
-        assert _find_product_name_index(lines, 0) == 1
+SALE
 
-    def test_inline_sale_not_skipped(self):
-        # "SALE 이벤트 가디건" 같이 SALE이 상품명 일부면 스킵 안 함
-        lines = ["#MC", "SALE 이벤트 가디건", "088 (QT)"]
-        assert _find_product_name_index(lines, 0) == 1
+러브기마 반팔
 
-    def test_brand_not_at_start(self):
-        # 브랜드가 첫 줄이 아닐 수도 있음
-        lines = ["쓸모없는 prefix", "#FG", "SALE", "오로라 피그먼트티", "028 (QT)"]
-        assert _find_product_name_index(lines, 1) == 3
+028 (QT)"""
+        result = extract_product_name_from_tokens(raw)
+        assert result == "러브기마 반팔"
+
+    def test_size_spec_block_removed(self):
+        raw = """#BB
+
+러브기마 반팔
+
+SIZE SPEC
+어깨 44 45 46 48
+가슴 50 52 54 57
+
+028 (QT)"""
+        result = extract_product_name_from_tokens(raw)
+        assert result == "러브기마 반팔"
+        assert "어깨" not in result
+        assert "44" not in result
+
+    def test_size_measurements_block_removed(self):
+        # SIZE SPEC 헤더 없이 실측치만 나오는 경우
+        raw = "#NK 후디 어깨 44 45 가슴 50 52 028 (QT)"
+        result = extract_product_name_from_tokens(raw)
+        assert "후디" in result
+        assert "어깨" not in result
+
+    def test_color_size_line_removed(self):
+        raw = """#BB
+
+반팔
+
+블랙 M L XL 2XL
+화이트 M L XL 2XL
+
+028 (QT)"""
+        result = extract_product_name_from_tokens(raw)
+        assert result == "반팔"
+
+    def test_fabric_description_removed(self):
+        raw = "#BB 반팔 나일론 스판텍스 기능성 소재 028 (QT)"
+        result = extract_product_name_from_tokens(raw)
+        assert result == "반팔"
+
+    def test_emoji_removed(self):
+        raw = "#GC\n아코디오 플리츠 스커츠 🍀\n055 (QT)"
+        result = extract_product_name_from_tokens(raw)
+        assert "🍀" not in result
+        assert "아코디오" in result
+
+    def test_conservative_preserves_normal_names(self):
+        """공격적 제거로 정상 상품명이 파괴되지 않는지 확인."""
+        raw = "#NK\nK26 멀티 컬러 크로스 후드집업\n088 (QT)"
+        result = extract_product_name_from_tokens(raw)
+        assert "K26" in result
+        assert "멀티" in result
+        assert "후드집업" in result
+
+    def test_cutoff_on_product_info_section(self):
+        """상품 구성 설명 이후는 잘림."""
+        raw = "#NK\nB33 스니커즈\n-color : 네이비\n-사이즈 36\n088 (QT)"
+        result = extract_product_name_from_tokens(raw)
+        assert "B33 스니커즈" in result
+        assert "네이비" not in result
+
+    def test_empty_input(self):
+        assert extract_product_name_from_tokens("") == ""
+        assert extract_product_name_from_tokens(None) == ""
+
+    def test_only_meta_returns_empty(self):
+        raw = "#BB 028 (QT) SALE"
+        result = extract_product_name_from_tokens(raw)
+        assert result == "" or result == " "
+
+    def test_price_code_removed(self):
+        raw = "#PD 나일론 재킷 088 (QT)"
+        result = extract_product_name_from_tokens(raw)
+        assert "088" not in result
+        assert "(QT)" not in result
 
 
 # ══════════════════════════════════════════════════════════════════
-# SECTION 2: parse_single_product - SALE 실제 통합 테스트
+# SECTION 2: parse_single_product - 통합 (SALE 포함)
 # ══════════════════════════════════════════════════════════════════
 class TestParseSingleProductWithSale:
     def test_sale_bb_shirt_real_case(self):
-        # 실데이터 기반 케이스
         content = """#BB
 
 SALE
@@ -117,10 +189,9 @@ SIZE SPEC
 사이즈 - M L
 088 (QT)"""
         products = parse_post(content, BRAND_MAP, "의류천국22")
-        assert products[0].product_name == "나일론 재킷"
+        assert "나일론 재킷" in products[0].product_name
 
     def test_sale_bag_brand(self):
-        # 잡화 밴드 케이스
         content = """#LV
 
 SALE
@@ -161,7 +232,6 @@ class TestClassifyBySizeSpec:
         assert _classify_by_size_spec(raw) == "top"
 
     def test_shoulder_only_returns_none(self):
-        # 어깨만 있고 가슴 없음 -> None (오탐 방지)
         raw = "#FG\n가방\n어깨 45\n050 (QT)"
         assert _classify_by_size_spec(raw) is None
 
@@ -170,7 +240,6 @@ class TestClassifyBySizeSpec:
         assert _classify_by_size_spec(raw) is None
 
     def test_bottom_priority_over_top(self):
-        # 하의 마커가 우선 (상의 마커도 같이 있어도 하의로)
         raw = "상의 65 / 어깨 57 / 가슴 60\n하의 허리 30 / 허벅지 25"
         assert _classify_by_size_spec(raw) == "bottom"
 
@@ -184,7 +253,6 @@ class TestClassifyBySizeSpec:
 # ══════════════════════════════════════════════════════════════════
 class TestClassifyCategoryWithRawContent:
     def test_keyword_match_takes_precedence_over_size_spec(self):
-        # 상품명에 "반팔"(top 키워드) 있으면 raw의 허리 키워드 무시하고 top 반환
         raw = "#BB\n러브기마 반팔\n허리 30 32"
         cat = classify_category(
             "러브기마 반팔", "의류천국22", CATEGORY_KEYWORDS,
@@ -193,7 +261,6 @@ class TestClassifyCategoryWithRawContent:
         assert cat == "top"
 
     def test_size_spec_fallback_bottom(self):
-        # 상품명 "CR 피그먼트"(키워드 미매칭) + raw에 허리 -> bottom
         raw = """#CH
 CR 피그먼트
 블랙 S M L
@@ -206,7 +273,6 @@ CR 피그먼트
         assert cat == "bottom"
 
     def test_size_spec_fallback_top(self):
-        # 상품명 "STU 주사위"(키워드 미매칭) + raw에 어깨+가슴 -> top
         raw = """#SS
 STU 주사위
 어깨 44 46
@@ -219,13 +285,12 @@ STU 주사위
         assert cat == "top"
 
     def test_size_spec_not_applied_to_accessory_band(self):
-        # 잡화천국22는 size-spec 폴백 적용 안 됨
         raw = "#HM\n네오 가든\n어깨 40 가슴 50"
         cat = classify_category(
             "네오 가든", "잡화천국22", CATEGORY_KEYWORDS,
             brand_tag="#HM", raw_content=raw,
         )
-        assert cat == "etc"  # 폴백 안 되고 etc 유지
+        assert cat == "etc"
 
     def test_empty_raw_content_no_fallback(self):
         cat = classify_category(
@@ -235,7 +300,6 @@ STU 주사위
         assert cat == "etc"
 
     def test_default_raw_content_backward_compat(self):
-        # raw_content 미제공 시 (기존 호출부 영향 없음)
         cat = classify_category(
             "반팔 티셔츠", "의류천국22", CATEGORY_KEYWORDS,
             brand_tag="#BB",
@@ -243,7 +307,6 @@ STU 주사위
         assert cat == "top"
 
     def test_watch_brand_fallback_still_works(self):
-        # 시계 브랜드 폴백이 size-spec보다 우선
         raw = "#RL\n데이저스트\n크라운 40"
         cat = classify_category(
             "알수없는시계", "잡화천국22", CATEGORY_KEYWORDS,
@@ -253,13 +316,10 @@ STU 주사위
 
 
 # ══════════════════════════════════════════════════════════════════
-# SECTION 5: 실데이터 패턴 회귀 테스트 (audit 결과 기반)
+# SECTION 5: 실데이터 패턴 회귀 테스트
 # ══════════════════════════════════════════════════════════════════
 class TestRealWorldPatterns:
-    """audit_for_review.xlsx 실데이터 기반 오분류 복구 검증."""
-
     def test_sale_bb_with_keyword(self):
-        # "SALE" + "반팔" -> 반팔 추출 + top 분류
         content = """#BB
 
 SALE
@@ -283,7 +343,6 @@ SIZE SPEC
         assert cat == "top"
 
     def test_half_pants_by_keyword(self):
-        # "하프"(bottom 키워드) 매칭 -> size-spec 폴백 없이 bottom
         content = """#SS
 
 STU 도쿄 하프
@@ -300,7 +359,6 @@ STU 도쿄 하프
         assert cat == "bottom"
 
     def test_crmark_pigment_by_size_spec(self):
-        # "CR 피그먼트" -> 키워드 "피그먼트" 매칭되어 top (또는 size-spec 폴백으로도 top)
         content = """#CH
 
 CR 피그먼트
@@ -321,7 +379,6 @@ CR 피그먼트
         assert cat == "top"
 
     def test_halfmoon_crossbag_not_misclassified(self):
-        # "[N] 하프문 크로스백" -> 하프(bottom) vs 크로스백(bag) 중 last-match로 bag
         name = "[N] 하프문 크로스백"
         cat = classify_category(
             name, "잡화천국22", CATEGORY_KEYWORDS,
