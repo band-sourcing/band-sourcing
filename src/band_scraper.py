@@ -42,6 +42,13 @@ class BandScraper:
     MAX_EVAL_RETRIES = 3
     EVAL_RETRY_DELAY = 2.0
 
+    # fetch_all_posts 상위 retry 설정
+    MAX_FETCH_RETRIES = 3
+    FETCH_RETRY_DELAY = 3.0
+
+    # 2-pass/3-pass 상세 페이지 방문 시 게시글 단위 retry
+    MAX_DETAIL_RETRIES = 2
+
     def __init__(
         self,
         naver_id: str,
@@ -65,6 +72,28 @@ class BandScraper:
         self._page: Page | None = None
         self._logged_in = False
 
+    # ── 에러 판정 및 복구 헬퍼 ──
+
+    @staticmethod
+    def _is_context_error(exc: BaseException) -> bool:
+        """
+        예외가 Playwright execution context 파괴/네비게이션 관련인지 판정.
+        밴드 SPA 특성상 스크롤/클릭 중 pushState 또는 full navigation이 트리거되면
+        진행 중이던 evaluate/locator 호출이 TargetClosed/Execution context destroyed로 터진다.
+        """
+        if exc is None:
+            return False
+        msg = str(exc).lower()
+        markers = (
+            "execution context",
+            "destroyed",
+            "navigat",
+            "target closed",
+            "target page",
+            "frame was detached",
+        )
+        return any(m in msg for m in markers)
+
     # ── 안전한 JS 실행 (context 파괴 대응) ──
 
     def _safe_evaluate(self, expression: str, retries: int = None):
@@ -79,8 +108,7 @@ class BandScraper:
             try:
                 return self._page.evaluate(expression)
             except Exception as e:
-                err_msg = str(e).lower()
-                if "execution context" in err_msg or "destroyed" in err_msg or "navigat" in err_msg:
+                if self._is_context_error(e):
                     last_error = e
                     logger.warning(
                         f"Execution context 파괴 감지 (시도 {attempt + 1}/{max_retries}): {e}"
@@ -132,8 +160,7 @@ class BandScraper:
                 time.sleep(1.5)
                 return
             except Exception as e:
-                err_msg = str(e).lower()
-                if "execution context" in err_msg or "destroyed" in err_msg:
+                if self._is_context_error(e):
                     logger.warning(
                         f"goto context 파괴 (시도 {attempt + 1}): {url}"
                     )
@@ -399,27 +426,100 @@ class BandScraper:
         밴드의 게시글을 스크롤하면서 수집.
         cutoff_date 이전 게시글이 나오면 중단.
         2-pass: 가격코드 누락된 게시글은 상세 페이지에서 보충.
+        3-pass: 이미지가 피드 상한(4장) 이하인 게시글은 상세 페이지에서 이미지 재추출.
+
+        전체 프로세스를 retry 래퍼로 감싸서 치명적 context 파괴 발생 시
+        최대 MAX_FETCH_RETRIES 회까지 피드 재진입 후 이어서 수집한다.
+        누적된 seen_keys/all_posts는 재시도 간 보존되어 중복 수집을 방지한다.
         """
         self.ensure_logged_in()
 
         band_url = f"{BAND_HOME}/band/{band_key}"
-        self._page.goto(band_url, wait_until="domcontentloaded", timeout=30000)
-        time.sleep(3)
+        all_posts: list[dict] = []
+        seen_keys: set[str] = set()
 
-        # 로그인 리다이렉트 감지 -> 세션 만료
-        if self._is_redirected_to_login():
+        last_fatal_error: BaseException | None = None
+
+        for attempt in range(self.MAX_FETCH_RETRIES):
+            try:
+                if attempt > 0:
+                    logger.warning(
+                        f"fetch_all_posts 재시도 {attempt}/{self.MAX_FETCH_RETRIES - 1} "
+                        f"(누적 수집: {len(all_posts)}개)"
+                    )
+                    time.sleep(self.FETCH_RETRY_DELAY)
+
+                # 밴드 피드 진입
+                try:
+                    self._safe_goto(band_url, timeout=30000)
+                except Exception as e:
+                    logger.error(f"밴드 피드 진입 실패 (attempt {attempt + 1}): {e}")
+                    last_fatal_error = e
+                    continue
+
+                time.sleep(2)
+
+                # 로그인 리다이렉트 감지 -> 세션 만료 (재시도해도 무의미)
+                if self._is_redirected_to_login():
+                    logger.error(
+                        f"밴드 {band_key} 진입 시 로그인 리다이렉트 감지 -> 세션 만료됨. "
+                        f"로컬 PC에서 쿠키를 갱신하여 data/band_session.json을 교체해야 합니다."
+                    )
+                    return []
+
+                # 스크롤 수집 (seen_keys/all_posts는 in-place 업데이트)
+                self._scroll_and_collect_posts(band_key, band_url, all_posts, seen_keys)
+
+                # 여기까지 왔으면 스크롤 수집은 성공. 상세 보충은 별도 루프.
+                break
+
+            except Exception as e:
+                last_fatal_error = e
+                if self._is_context_error(e):
+                    logger.warning(
+                        f"스크롤 수집 중 치명적 context 에러 (attempt {attempt + 1}): {e}"
+                    )
+                    # 다음 반복에서 피드 재진입
+                    continue
+                # 비-context 에러는 즉시 전파
+                logger.error(f"fetch_all_posts 비-context 에러 -> 전파: {e}")
+                raise
+
+        else:
+            # for-else: MAX_FETCH_RETRIES 회 모두 실패
             logger.error(
-                f"밴드 {band_key} 진입 시 로그인 리다이렉트 감지 -> 세션 만료됨. "
-                f"로컬 PC에서 쿠키를 갱신하여 data/band_session.json을 교체해야 합니다."
+                f"fetch_all_posts 최대 재시도({self.MAX_FETCH_RETRIES}) 초과 "
+                f"-> 현재까지 수집된 {len(all_posts)}개만 반환. 마지막 에러: {last_fatal_error}"
             )
-            # headless 환경에서 네이버 자동 로그인은 캡차로 인해 불가능
-            return []
 
-        all_posts = []
-        seen_keys = set()
+        logger.info(f"밴드 {band_key}: 1차 수집 {len(all_posts)}개")
+
+        # ── 2-pass / 3-pass는 게시글 단위 독립 실행 (전체 재시도 불필요) ──
+        self._supplement_detail_content(all_posts)
+        self._supplement_detail_photos(all_posts)
+
+        logger.info(f"밴드 {band_key}: 총 {len(all_posts)}개 게시글 수집")
+
+        # 성공 시 세션 갱신 저장 (서버가 내려준 최신 쿠키 반영)
+        if all_posts:
+            self._save_session()
+
+        return all_posts
+
+    def _scroll_and_collect_posts(
+        self,
+        band_key: str,
+        band_url: str,
+        all_posts: list[dict],
+        seen_keys: set[str],
+    ) -> None:
+        """
+        스크롤하며 게시글을 수집. all_posts / seen_keys를 in-place 업데이트.
+        치명적 context 에러(MAX_CONTEXT_ERRORS 초과)는 예외로 전파하여
+        fetch_all_posts 상위 루프가 재시도할 수 있도록 한다.
+        """
         no_new_count = 0
         max_scroll_attempts = 100
-
         context_error_count = 0
         MAX_CONTEXT_ERRORS = 5
 
@@ -429,21 +529,19 @@ class BandScraper:
                 post_elements = self._page.locator('article._postMainWrap')
                 current_count = post_elements.count()
             except Exception as e:
-                err_msg = str(e).lower()
-                if "execution context" in err_msg or "destroyed" in err_msg:
+                if self._is_context_error(e):
                     context_error_count += 1
                     logger.warning(
                         f"스크롤 중 context 파괴 (#{context_error_count}) -> 복구 시도"
                     )
                     if context_error_count > MAX_CONTEXT_ERRORS:
-                        logger.error("context 파괴 횟수 초과 -> 수집 중단")
-                        break
+                        logger.error("context 파괴 횟수 초과 -> 상위 retry에 위임")
+                        # 상위 fetch_all_posts가 재시도하도록 예외 전파
+                        raise
                     self._wait_for_stable_context()
-                    # 밴드 피드가 다른 페이지로 이동했을 수 있으므로 URL 확인
                     if f"/band/{band_key}" not in self._page.url:
                         logger.info("피드 이탈 감지 -> 밴드 피드로 복귀")
-                        self._page.goto(band_url, wait_until="domcontentloaded", timeout=30000)
-                        time.sleep(3)
+                        self._recover_to_feed(band_url)
                     continue
                 raise
 
@@ -471,8 +569,7 @@ class BandScraper:
                     new_found = True
 
                 except Exception as e:
-                    err_msg = str(e).lower()
-                    if "execution context" in err_msg or "destroyed" in err_msg:
+                    if self._is_context_error(e):
                         logger.warning(f"게시글 파싱 중 context 파괴 (index {i}) -> 이번 스크롤 스킵")
                         self._wait_for_stable_context()
                         break
@@ -495,61 +592,96 @@ class BandScraper:
             try:
                 self._safe_evaluate("window.scrollTo(0, document.body.scrollHeight)")
             except Exception as e:
-                logger.warning(f"스크롤 실패 -> 밴드 피드 복귀: {e}")
-                self._page.goto(band_url, wait_until="domcontentloaded", timeout=30000)
-                time.sleep(3)
+                if self._is_context_error(e):
+                    logger.warning(f"스크롤 evaluate 실패 -> 피드 복귀 후 계속: {e}")
+                    self._recover_to_feed(band_url)
+                else:
+                    raise
             time.sleep(2)
 
-        logger.info(f"밴드 {band_key}: 1차 수집 {len(all_posts)}개")
+    def _recover_to_feed(self, band_url: str) -> None:
+        """피드 URL로 복귀. 복귀 실패 시 예외 전파 (상위 retry가 대응)."""
+        try:
+            self._page.goto(band_url, wait_until="domcontentloaded", timeout=30000)
+            time.sleep(3)
+        except Exception as e:
+            logger.warning(f"피드 복귀 실패: {e}")
+            raise
 
-        # ── 2-pass: 가격코드 없는 게시글 상세 페이지 방문 ──
+    def _supplement_detail_content(self, all_posts: list[dict]) -> None:
+        """
+        2-pass: 가격코드 누락된 게시글을 상세 페이지에서 보충.
+        게시글 단위 독립 실행 -> 실패 시 해당 게시글만 스킵.
+        각 게시글당 MAX_DETAIL_RETRIES 회까지 재시도 (context 파괴에 대응).
+        """
         PRICE_RE = re.compile(r'\d{3}\s*\([A-Za-z][A-Za-z0-9]*\)')
         need_detail = [p for p in all_posts if p["content"] and not PRICE_RE.search(p["content"])]
         logger.info(f"  가격코드 누락 {len(need_detail)}개 -> 상세 페이지 보충 시작")
+
+        detail_selectors = [
+            'p.txtBody',
+            '.postText',
+            '._postText',
+            '[class*="postText"]',
+            '[class*="txtBody"]',
+            '.dPostBody',
+            '._postBody',
+        ]
 
         for idx, post in enumerate(need_detail):
             post_url = post.get("_detail_url", "")
             if not post_url:
                 continue
-            try:
-                self._safe_goto(post_url)
 
-                detail_selectors = [
-                    'p.txtBody',
-                    '.postText',
-                    '._postText',
-                    '[class*="postText"]',
-                    '[class*="txtBody"]',
-                    '.dPostBody',
-                    '._postBody',
-                ]
+            supplemented = False
+            for detail_attempt in range(self.MAX_DETAIL_RETRIES):
+                try:
+                    self._safe_goto(post_url)
 
-                for sel in detail_selectors:
-                    try:
-                        text_el = self._page.locator(sel).first
-                        if text_el.count() > 0:
-                            text = text_el.inner_text().strip()
-                            if text and len(text) > 3 and PRICE_RE.search(text):
-                                post["content"] = text
-                                logger.debug(f"  [{idx}] 상세 보충 성공: {len(text)}자")
+                    for sel in detail_selectors:
+                        try:
+                            text_el = self._page.locator(sel).first
+                            if text_el.count() > 0:
+                                text = text_el.inner_text().strip()
+                                if text and len(text) > 3 and PRICE_RE.search(text):
+                                    post["content"] = text
+                                    logger.debug(f"  [{idx}] 상세 보충 성공: {len(text)}자")
+                                    supplemented = True
+                                    break
+                        except Exception as inner_e:
+                            if self._is_context_error(inner_e):
+                                self._wait_for_stable_context()
                                 break
-                    except Exception as e:
-                        err_msg = str(e).lower()
-                        if "execution context" in err_msg or "destroyed" in err_msg:
-                            self._wait_for_stable_context()
-                            break
-                        continue
+                            continue
 
-            except Exception as e:
-                logger.debug(f"  [{idx}] 상세 진입 실패: {e}")
+                    # 상세 진입 + 텍스트 탐색까지 성공하면 재시도 중단
+                    break
+
+                except Exception as e:
+                    if self._is_context_error(e) and detail_attempt < self.MAX_DETAIL_RETRIES - 1:
+                        logger.debug(
+                            f"  [{idx}] 상세 진입 context 파괴 (재시도 "
+                            f"{detail_attempt + 1}/{self.MAX_DETAIL_RETRIES}): {e}"
+                        )
+                        self._wait_for_stable_context()
+                        continue
+                    logger.debug(f"  [{idx}] 상세 진입 실패: {e}")
+                    break
 
         filled = sum(1 for p in need_detail if PRICE_RE.search(p.get("content", "")))
         logger.info(f"  상세 보충 완료: {filled}/{len(need_detail)}개 성공")
 
-        # ── 3-pass: 이미지 4장 이하 게시글 → 상세 페이지에서 이미지 재추출 ──
-        # 밴드 피드 UI가 4장까지만 표시하므로 상세 페이지에서 전체 이미지를 가져온다
+    def _supplement_detail_photos(self, all_posts: list[dict]) -> None:
+        """
+        3-pass: 피드 상한(4장) 이하 게시글의 이미지를 상세 페이지에서 재추출.
+        게시글 단위 독립 실행 -> 실패 시 기존 이미지 유지.
+        각 게시글당 MAX_DETAIL_RETRIES 회까지 재시도.
+        """
         MAX_FEED_IMAGES = 4
-        need_images = [p for p in all_posts if len(p.get("photos", [])) <= MAX_FEED_IMAGES and p.get("photos")]
+        need_images = [
+            p for p in all_posts
+            if len(p.get("photos", [])) <= MAX_FEED_IMAGES and p.get("photos")
+        ]
         logger.info(f"  이미지 보충 대상 {len(need_images)}개 (≤{MAX_FEED_IMAGES}장)")
 
         img_supplemented = 0
@@ -558,31 +690,37 @@ class BandScraper:
             if not post_url:
                 continue
             old_count = len(post["photos"])
-            try:
-                self._safe_goto(post_url)
 
-                # 상세 페이지의 게시글 컨테이너에서 이미지 추출
-                detail_el = self._page.locator('article._postMainWrap').first
-                if detail_el.count() == 0:
-                    detail_el = self._page.locator('.dPostBody, ._postBody, .postBody').first
-                if detail_el.count() > 0:
-                    detail_photos = self._extract_photos(detail_el)
-                    if len(detail_photos) > old_count:
-                        post["photos"] = detail_photos
-                        img_supplemented += 1
-                        logger.debug(f"  [{idx}] 이미지 보충: {old_count}→{len(detail_photos)}장")
-            except Exception as e:
-                logger.debug(f"  [{idx}] 이미지 상세 진입 실패: {e}")
+            for detail_attempt in range(self.MAX_DETAIL_RETRIES):
+                try:
+                    self._safe_goto(post_url)
+
+                    detail_el = self._page.locator('article._postMainWrap').first
+                    if detail_el.count() == 0:
+                        detail_el = self._page.locator('.dPostBody, ._postBody, .postBody').first
+
+                    if detail_el.count() > 0:
+                        detail_photos = self._extract_photos(detail_el)
+                        if len(detail_photos) > old_count:
+                            post["photos"] = detail_photos
+                            img_supplemented += 1
+                            logger.debug(
+                                f"  [{idx}] 이미지 보충: {old_count}→{len(detail_photos)}장"
+                            )
+                    break
+
+                except Exception as e:
+                    if self._is_context_error(e) and detail_attempt < self.MAX_DETAIL_RETRIES - 1:
+                        logger.debug(
+                            f"  [{idx}] 이미지 상세 context 파괴 (재시도 "
+                            f"{detail_attempt + 1}/{self.MAX_DETAIL_RETRIES}): {e}"
+                        )
+                        self._wait_for_stable_context()
+                        continue
+                    logger.debug(f"  [{idx}] 이미지 상세 진입 실패: {e}")
+                    break
 
         logger.info(f"  이미지 보충 완료: {img_supplemented}/{len(need_images)}개 보충됨")
-
-        logger.info(f"밴드 {band_key}: 총 {len(all_posts)}개 게시글 수집")
-
-        # 성공 시 세션 갱신 저장 (서버가 내려준 최신 쿠키 반영)
-        if all_posts:
-            self._save_session()
-
-        return all_posts
 
     def _parse_post_element(self, el, band_key: str) -> dict | None:
         """단일 게시글 DOM 요소에서 데이터 추출."""

@@ -517,7 +517,11 @@ class TestFetchAllPostsDetailPass:
         assert "121 (AI24)" in result[0]["content"]
 
     def test_2pass_context_destroyed_skips(self, scraper, test_server):
-        """2-pass: 상세 진입 시 context 파괴 -> 해당 게시글 스킵 후 계속."""
+        """
+        2-pass: 상세 진입 시 context 파괴가 MAX_DETAIL_RETRIES 회 모두 발생하면
+        해당 게시글만 스킵되고 다른 게시글 보충은 정상 진행.
+        (Task 10 retry 로직: 게시글당 내부 재시도가 모두 소진되어야 스킵)
+        """
         posts_html = "".join([
             _make_post_html("p1", "#PD\n상품1\n추후공지", days_ago=1, base_url=test_server),
             _make_post_html("p2", "#PD\n상품2\n추후공지", days_ago=2, base_url=test_server),
@@ -526,25 +530,62 @@ class TestFetchAllPostsDetailPass:
         BandTestHandler.detail_pages["p1"] = _make_detail_page("p1", "#PD\n상품1\n200 (QE)")
         BandTestHandler.detail_pages["p2"] = _make_detail_page("p2", "#PD\n상품2\n150 (BM)")
 
-        goto_count = 0
         original_goto = scraper._page.goto
 
-        def fail_first_detail(url, **kwargs):
-            nonlocal goto_count
-            if "/post/" in url:
-                goto_count += 1
-                if goto_count == 1:
-                    raise PlaywrightError("Execution context was destroyed, most likely because of a navigation")
+        def fail_p1_detail_always(url, **kwargs):
+            # p1 상세 진입은 항상 실패 (retry 모두 소진)
+            if "/post/p1" in url:
+                raise PlaywrightError(
+                    "Execution context was destroyed, most likely because of a navigation"
+                )
             return original_goto(url, **kwargs)
 
         with patch("src.band_scraper.BAND_HOME", test_server):
-            with patch.object(scraper, "_safe_goto", side_effect=fail_first_detail):
+            with patch.object(scraper, "_safe_goto", side_effect=fail_p1_detail_always):
                 result = scraper.fetch_all_posts("12345")
 
         assert len(result) == 2
-        # p1은 context 파괴로 보충 실패 -> 원래 content 유지
+        # p1은 retry 모두 실패 -> 원래 content 유지
         p1 = next(p for p in result if "p1" in p["post_key"])
         assert "추후공지" in p1["content"]
+        # p2는 상세 보충 성공해야 함 (다른 게시글 독립성 확인)
+        p2 = next(p for p in result if "p2" in p["post_key"])
+        assert "150 (BM)" in p2["content"]
+
+    def test_2pass_recovers_on_transient_context_error(self, scraper, test_server):
+        """
+        2-pass: 첫 시도 context 파괴 -> 두 번째 시도 성공.
+        MAX_DETAIL_RETRIES 덕에 일시적 파괴는 복구되어야 한다.
+        """
+        posts_html = _make_post_html(
+            "p_recov", "#PD\n상품\n추후공지", days_ago=1, base_url=test_server,
+        )
+        BandTestHandler.feed_html = _make_feed_page(posts_html, "12345")
+        BandTestHandler.detail_pages["p_recov"] = _make_detail_page(
+            "p_recov", "#PD\n상품\n300 (XY)"
+        )
+
+        original_goto = scraper._page.goto
+        call_count = {"n": 0}
+
+        def fail_once_then_succeed(url, **kwargs):
+            if "/post/p_recov" in url:
+                call_count["n"] += 1
+                if call_count["n"] == 1:
+                    raise PlaywrightError(
+                        "Execution context was destroyed, most likely because of a navigation"
+                    )
+            return original_goto(url, **kwargs)
+
+        with patch("src.band_scraper.BAND_HOME", test_server):
+            with patch.object(scraper, "_safe_goto", side_effect=fail_once_then_succeed):
+                result = scraper.fetch_all_posts("12345")
+
+        assert len(result) == 1
+        # 2번째 시도에서 성공 -> 보충됨
+        assert "300 (XY)" in result[0]["content"]
+        # 최소 2회 호출됨을 확인 (1회째 실패 + 2회째 성공)
+        assert call_count["n"] >= 2
 
     def test_3pass_image_supplement_success(self, scraper, test_server):
         """3-pass: 상세 페이지에서 이미지 보충 성공 (피드 4장 -> 상세 6장)."""
@@ -690,3 +731,200 @@ class TestRealContextDestruction:
         scraper._safe_evaluate("window.scrollTo(0, document.body.scrollHeight)")
         scroll_count = scraper._page.evaluate("window._scrollCount")
         assert scroll_count >= 1
+
+
+# ══════════════════════════════════════════
+# 8. Task 10: fetch_all_posts 상위 레벨 retry
+# ══════════════════════════════════════════
+
+class TestFetchAllPostsRetry:
+    """
+    fetch_all_posts의 상위 레벨 retry 로직 검증.
+    스크롤 수집 중 MAX_CONTEXT_ERRORS 초과로 치명적 에러가 발생해도
+    피드 재진입 후 seen_keys를 활용해 이어서 수집해야 한다.
+    """
+
+    def test_scroll_retry_recovers_from_fatal_context_error(self, scraper, test_server):
+        """
+        스크롤 수집 중 치명적 context 에러 -> fetch_all_posts 상위 retry가
+        피드 재진입 후 누적 seen_keys로 이어서 수집.
+        """
+        posts_html = "".join([
+            _make_post_html(f"retry{i}", f"#PD\n상품{i}\n{200+i} (AI)", days_ago=i, base_url=test_server)
+            for i in range(3)
+        ])
+        BandTestHandler.feed_html = _make_feed_page(posts_html, "12345")
+
+        # _scroll_and_collect_posts가 첫 호출에서만 치명적 에러를 전파
+        original_scroll = scraper._scroll_and_collect_posts
+        attempts = {"n": 0}
+
+        def flaky_scroll(band_key, band_url, all_posts, seen_keys):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                # 첫 시도: 게시글 1개만 수집하고 치명적 에러 발생 시뮬레이션
+                result = original_scroll(band_key, band_url, all_posts, seen_keys)
+                # 강제로 context 에러 throw
+                raise PlaywrightError(
+                    "Execution context was destroyed, most likely because of a navigation"
+                )
+            # 2번째 시도: 정상 수집 (seen_keys 덕에 중복 스킵)
+            return original_scroll(band_key, band_url, all_posts, seen_keys)
+
+        with patch("src.band_scraper.BAND_HOME", test_server):
+            with patch.object(scraper, "_scroll_and_collect_posts", side_effect=flaky_scroll):
+                result = scraper.fetch_all_posts("12345")
+
+        # 2회 시도로 수집 성공
+        assert attempts["n"] == 2
+        assert len(result) == 3
+        # 중복 없음
+        keys = [p["post_key"] for p in result]
+        assert len(keys) == len(set(keys))
+
+    def test_scroll_retry_preserves_seen_keys_across_attempts(self, scraper, test_server):
+        """
+        retry 시 누적 seen_keys가 유지되어 동일 게시글을 재수집하지 않음.
+        2번째 시도에서 같은 피드를 다시 읽어도 결과는 3개여야 한다.
+        """
+        posts_html = "".join([
+            _make_post_html(f"dup{i}", f"#PD\n상품{i}\n{100+i} (AI)", days_ago=i, base_url=test_server)
+            for i in range(3)
+        ])
+        BandTestHandler.feed_html = _make_feed_page(posts_html, "12345")
+
+        original_scroll = scraper._scroll_and_collect_posts
+        attempts = {"n": 0}
+
+        def succeed_then_fail_then_succeed(band_key, band_url, all_posts, seen_keys):
+            attempts["n"] += 1
+            # 매 호출마다 원본 실행 (seen_keys가 누적되는지 검증)
+            pre_count = len(all_posts)
+            original_scroll(band_key, band_url, all_posts, seen_keys)
+            if attempts["n"] == 1:
+                # 첫 시도: 수집은 완료됐지만 치명적 에러 발생
+                raise PlaywrightError("Execution context was destroyed")
+            # 2번째 시도에서는 seen_keys 덕에 새 게시글이 추가되면 안 됨
+            assert len(all_posts) == pre_count, (
+                f"2회째 시도에서 중복 수집 발생: {pre_count} -> {len(all_posts)}"
+            )
+
+        with patch("src.band_scraper.BAND_HOME", test_server):
+            with patch.object(scraper, "_scroll_and_collect_posts",
+                              side_effect=succeed_then_fail_then_succeed):
+                result = scraper.fetch_all_posts("12345")
+
+        assert attempts["n"] == 2
+        assert len(result) == 3
+        keys = [p["post_key"] for p in result]
+        assert len(keys) == len(set(keys))
+
+    def test_scroll_retry_exhausts_returns_partial(self, scraper, test_server):
+        """
+        MAX_FETCH_RETRIES 회 모두 치명적 에러 -> 예외 없이 지금까지 수집된 것 반환.
+        """
+        posts_html = _make_post_html(
+            "partial", "#PD\n상품\n100 (AI)", days_ago=1, base_url=test_server
+        )
+        BandTestHandler.feed_html = _make_feed_page(posts_html, "12345")
+
+        original_scroll = scraper._scroll_and_collect_posts
+
+        def always_fail_after_collect(band_key, band_url, all_posts, seen_keys):
+            # 실제로 게시글은 수집 (all_posts에 1개 추가됨) 후 에러 던짐
+            original_scroll(band_key, band_url, all_posts, seen_keys)
+            raise PlaywrightError("Execution context was destroyed (persistent)")
+
+        with patch("src.band_scraper.BAND_HOME", test_server):
+            with patch.object(scraper, "_scroll_and_collect_posts",
+                              side_effect=always_fail_after_collect):
+                # 예외 전파되지 않아야 함
+                result = scraper.fetch_all_posts("12345")
+
+        # MAX_FETCH_RETRIES 회 모두 실패했지만 첫 시도 때 수집된 1개는 반환
+        # (중복 수집 방지 로직 덕에 결과는 1개)
+        assert len(result) == 1
+        # post_key 는 "{band_key}_{post_key}" 형태
+        assert "partial" in result[0]["post_key"]
+
+    def test_non_context_error_propagates_immediately(self, scraper, test_server):
+        """
+        context 에러가 아닌 일반 예외(ValueError 등)는 retry 없이 즉시 전파.
+        """
+        posts_html = _make_post_html(
+            "err", "#PD\n상품\n100 (AI)", days_ago=1, base_url=test_server
+        )
+        BandTestHandler.feed_html = _make_feed_page(posts_html, "12345")
+
+        attempts = {"n": 0}
+
+        def raise_value_error(band_key, band_url, all_posts, seen_keys):
+            attempts["n"] += 1
+            raise ValueError("non-context error")
+
+        with patch("src.band_scraper.BAND_HOME", test_server):
+            with patch.object(scraper, "_scroll_and_collect_posts",
+                              side_effect=raise_value_error):
+                with pytest.raises(ValueError, match="non-context error"):
+                    scraper.fetch_all_posts("12345")
+
+        # 단 1회만 호출되어야 함 (retry 안 함)
+        assert attempts["n"] == 1
+
+    def test_retry_skips_when_session_expired(self, scraper, test_server):
+        """
+        세션 만료(로그인 리다이렉트 감지) 시 retry 안 하고 즉시 빈 리스트 반환.
+        """
+        BandTestHandler.feed_html = _make_feed_page("", "12345")
+
+        # _is_redirected_to_login을 True로 강제
+        scraper._is_redirected_to_login = lambda: True
+
+        attempts = {"n": 0}
+        original_scroll = scraper._scroll_and_collect_posts
+
+        def tracked_scroll(*args, **kwargs):
+            attempts["n"] += 1
+            return original_scroll(*args, **kwargs)
+
+        with patch("src.band_scraper.BAND_HOME", test_server):
+            with patch.object(scraper, "_scroll_and_collect_posts",
+                              side_effect=tracked_scroll):
+                result = scraper.fetch_all_posts("12345")
+
+        assert result == []
+        # 세션 만료 시 스크롤 자체를 시도하지 않아야 함
+        assert attempts["n"] == 0
+
+
+# ══════════════════════════════════════════
+# 9. Task 10: _is_context_error 헬퍼 검증
+# ══════════════════════════════════════════
+
+class TestIsContextError:
+    """에러 판정 중앙화 헬퍼의 정확성 검증."""
+
+    @pytest.mark.parametrize("msg", [
+        "Execution context was destroyed, most likely because of a navigation",
+        "Target page, context or browser has been closed",
+        "Target closed",
+        "frame was detached",
+        "page.evaluate: Execution context was destroyed",
+        "navigation: frame was detached",
+    ])
+    def test_recognizes_context_errors(self, msg):
+        """context 에러로 분류되어야 하는 메시지들."""
+        assert BandScraper._is_context_error(Exception(msg)) is True
+
+    @pytest.mark.parametrize("msg", [
+        "TimeoutError: timeout 30000ms exceeded",
+        "Connection refused",
+        "ValueError: invalid input",
+        "404 Not Found",
+    ])
+    def test_rejects_non_context_errors(self, msg):
+        """context 에러가 아닌 일반 에러는 False."""
+        assert BandScraper._is_context_error(Exception(msg)) is False
+
+    def test_rejects_none(self):
+        assert BandScraper._is_context_error(None) is False
