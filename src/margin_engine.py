@@ -43,7 +43,15 @@ _WATCH_BRAND_TAGS = frozenset([
     "#JE",  # 예거르쿨트르
     "#TH",  # 태그호이어
     "#CP",  # 쇼파드
+    "#CT",  # 까르띠에 (Task 9: audit 후 추가 - 산토스/탱크 모델명은 brand fallback)
     "#SM",  # 쇼메
+])
+
+
+# outer 전용 브랜드 (다운 패딩 중심) - 의류천국22에서 키워드 매칭 실패 시 폴백
+# Task 9 v3: 몽클레르 다운 모델명(레페/케랄레 등)은 상품명에 outer 키워드가 없어서 etc로 감
+_OUTER_BRAND_TAGS = frozenset([
+    "#MC",  # 몽클레르
 ])
 
 
@@ -182,6 +190,11 @@ def classify_category(
     # 브랜드 기반 폴백: 시계 전용 브랜드는 키워드 없어도 watch
     if brand_tag in _WATCH_BRAND_TAGS:
         return "watch"
+
+    # 브랜드 기반 폴백: outer 전용 브랜드 (몽클레르) + 의류천국22
+    # 상품명이 모델명만 있고 outer 키워드 없는 경우 (레페/케랄레 등)
+    if brand_tag in _OUTER_BRAND_TAGS and source_band == "의류천국22":
+        return "outer"
 
     # 의류천국22 전용 폴백: 실측 스펙 키워드로 상의/하의 역추론
     if source_band == "의류천국22" and raw_content:

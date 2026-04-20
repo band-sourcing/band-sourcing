@@ -170,10 +170,12 @@ _TRAILING_PUNCT_RE = re.compile(r'^[\s,\.\-_:;]+|[\s,\.\-_:;]+$')
 
 def extract_product_name_from_tokens(raw_content: str) -> str:
     """
-    토큰 기반 상품명 추출 (Task 8).
-    
-    <br>/줄바꿈을 공백으로 정규화 후 모든 메타데이터를 제거하고
-    남은 텍스트를 상품명으로 반환한다. 라인 순서나 SALE 위치에 영향받지 않음.
+    토큰 기반 상품명 추출 (Task 8 + Task 9 v3 개선).
+
+    Task 9 v3 개선 사항:
+    - 라인별 처리 도입 -> 사이즈 전용 라인(M 95-100 등) 통째로 제거
+    - 상품 유형 키워드(자켓/바람막이/티셔츠 등) 있는 라인은 보호
+    - SIZE / COLOR 헤더 이후 전부 제거
 
     제거 대상:
     - <br> 태그, 줄바꿈, 탭
@@ -181,8 +183,8 @@ def extract_product_name_from_tokens(raw_content: str) -> str:
     - 가격/공장코드 (028 (QT) 등)
     - SIZE SPEC 헤더 이후 전체
     - 실측치 블록 (어깨 44 45... / 가슴 50 52...)
-    - 색상/사이즈 헤더 (색상 - / 사이즈 - / SIZE SPEC)
-    - 색상 + 사이즈 조합 라인 (블랙 M L XL)
+    - 사이즈 전용 라인 (M 95-100, 95 100 105 110, 2번 95 등)
+    - 색상 전용 라인 (SIZE/COLOR 헤더 뒤에 있는 블랙 화이트 같은 것)
     - 세트 옵션 라인 (상의 95 100 / 하의 30 32)
     - SALE/세일 마커
     - 등급 태그 (#SA급 #고퀄)
@@ -190,43 +192,96 @@ def extract_product_name_from_tokens(raw_content: str) -> str:
 
     Args:
         raw_content: 밴드 게시글 원본 텍스트 (HTML 혹은 plain)
-    
+
     Returns:
         정리된 상품명 문자열. 추출 실패시 빈 문자열.
     """
     if not raw_content:
         return ""
-    
+
     text = raw_content
-    
-    # 1) HTML 태그 정규화 - <br> 먼저 공백으로, 나머지 태그는 제거
-    text = re.sub(r'<br\s*/?>', ' ', text, flags=re.IGNORECASE)
+
+    # 1) HTML 태그 정규화 - <br> 는 줄바꿈으로 (라인 처리 위해)
+    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
     text = re.sub(r'<band:hashtag>(.*?)</band:hashtag>', r' \1 ', text)
     text = re.sub(r'<band:refer[^>]*>(.*?)</band:refer>', r' \1 ', text)
     text = re.sub(r'<band:attachment[^/]*/>', ' ', text)
     text = re.sub(r'<[^>]+>', ' ', text)
-    
-    # 2) SIZE SPEC 헤더 이후 전부 제거 (가장 먼저 - 이후 로직이 이 영역을 건드리지 않도록)
+
+    # 2) SIZE SPEC 헤더 이후 전부 제거 (가장 먼저)
     text = _SIZE_SPEC_HEADER_RE.sub(' ', text)
-    
-    # 3) 줄바꿈/탭을 공백으로
-    text = re.sub(r'[\n\r\t]+', ' ', text)
-    
-    # 4) 메타 토큰 제거 (순서 중요 - 긴 패턴 먼저)
-    # 보수적 접근: 정상 상품명을 건드리지 않는 범위에서만 제거
-    # 완전히 분류 실패한 건은 Task 9/10(엑셀+메일)에서 반자동 처리
+
+    # 3) 라인 기반 처리 - 사이즈/헤더 라인 필터링 (v3 핵심)
+    lines = text.split('\n')
+    kept_lines = []
+    size_block_started = False
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        # 3-a) 가격코드 단독 라인 제거
+        if re.fullmatch(r'\s*\d{3}\s*\([A-Za-z][A-Za-z0-9]*\)\s*', stripped):
+            continue
+
+        # 3-b) SIZE / COLOR / 사이즈 / 컬러 / 색상 단독 헤더 라인 (또는 그 뒤에 값이 붙은 라인)
+        # 예: "SIZE" / "COLOR" / "SIZE 프리 오버사이즈" / "사이즈 프리" / "Color: 블랙.레드.블루"
+        # 단, 해당 라인에 상품 유형 키워드(저지/자켓/티 등)가 있으면 상품명으로 보존
+        has_product_kw = any(kw in stripped for kw in _PRODUCT_TYPE_KEYWORDS)
+        if not has_product_kw:
+            if re.match(
+                r'^(SIZE|COLOR|사이즈|컬러|색상|색\s*상|옵션|소재|원단|2color|1color)'
+                r'[\s:：\-~]+',
+                stripped, re.IGNORECASE
+            ):
+                size_block_started = True
+                continue
+            if re.fullmatch(
+                r'(SIZE|COLOR|사이즈|컬러|색상|색\s*상|옵션|소재|원단|2color|1color)\s*',
+                stripped, re.IGNORECASE
+            ):
+                size_block_started = True
+                continue
+
+        # 3-c) 브랜드 태그만 있는 라인
+        if re.fullmatch(r'(#[A-Za-z]{2,4}\s*)+', stripped):
+            continue
+
+        # 3-d) SALE / 세일 단독
+        if re.fullmatch(r'(SALE|sale|세일|Sale)\s*', stripped):
+            continue
+
+        # 3-e) 괄호 안 성별 단독 (WOMEN) (WOMAN) 등
+        if re.fullmatch(r'\([A-Za-z가-힣]+\)\s*', stripped):
+            continue
+
+        # 3-f) 사이즈 전용 라인
+        if _is_size_only_line(stripped):
+            size_block_started = True
+            continue
+
+        # 3-g) size 블록 진입 후 색상 나열 라인
+        if size_block_started and _is_color_only_line(stripped):
+            continue
+
+        kept_lines.append(stripped)
+
+    text = ' '.join(kept_lines)
+
+    # 4) 메타 토큰 제거 (라인 처리에서 누락된 것들 보강)
     text = _PRICE_CODE_FULL_RE.sub(' ', text)       # 가격코드
     text = _GRADE_PROMO_RE.sub(' ', text)           # 등급 태그
-    text = _FABRIC_DESC_RE.sub(' ', text)           # 소재/원단 설명 블록 (meta_header보다 먼저)
-    text = _META_HEADER_RE.sub(' ', text)           # 색상/사이즈 헤더 (콜론/하이픈 있을 때만)
-    text = _SIZE_SPEC_RE.sub(' ', text)             # 실측치 블록 (어깨 44 45...)
-    text = _SET_OPTION_LINE_RE.sub(' ', text)       # 세트 옵션 (상의/하의 사이즈)
-    text = _COLOR_SIZE_LINE_RE.sub(' ', text)       # 색상+사이즈 라인 (블랙 M L XL)
+    text = _FABRIC_DESC_RE.sub(' ', text)           # 소재/원단 설명
+    text = _META_HEADER_RE.sub(' ', text)           # 색상/사이즈 헤더
+    text = _SIZE_SPEC_RE.sub(' ', text)             # 실측치 블록
+    text = _SET_OPTION_LINE_RE.sub(' ', text)       # 세트 옵션
+    text = _COLOR_SIZE_LINE_RE.sub(' ', text)       # 색상+사이즈 라인
     text = _BRAND_TAG_ANY_RE.sub(' ', text)         # 브랜드 태그
     text = _SALE_TOKEN_RE.sub(' ', text)            # SALE 마커
     text = _EMOJI_RE.sub(' ', text)                 # 이모지
     text = _DECORATION_RE.sub(' ', text)            # 장식문자
-    
+
     # 5) 민감정보 (연락처 / 소싱정보)
     text = re.sub(
         r'카카오톡|카톡|친구추가|e\d{4}|010[-\s]?\d{4}[-\s]?\d{4}',
@@ -237,8 +292,7 @@ def extract_product_name_from_tokens(raw_content: str) -> str:
         ' ', text
     )
 
-    # 6) 상품 부가정보 섹션 컷오프 (상품명 이후는 부가설명일 가능성 높음)
-    # 이 마커 이후는 분류에 불필요한 부가 텍스트 (상품 구성/입고/사진참조 등)
+    # 6) 상품 부가정보 섹션 컷오프
     cutoff_markers = [
         r'\s*ㆍ\s*구성',
         r'\s*구성품\s*[-:ㅡ]',
@@ -266,6 +320,129 @@ def extract_product_name_from_tokens(raw_content: str) -> str:
     text = _TRAILING_PUNCT_RE.sub('', text)
 
     return text.strip()
+
+
+# ═══════════════════════════════════════════════════════════════
+# 라인 판정 헬퍼 (Task 9 v3)
+# ═══════════════════════════════════════════════════════════════
+
+# 상품 유형 키워드 - 이 키워드가 포함된 라인은 사이즈 라인 판정에서 제외
+_PRODUCT_TYPE_KEYWORDS = frozenset([
+    '자켓', '재킷', '쟈켓', '바람막이', '후드자켓', '코트', '패딩', '가디건', '집업',
+    '티셔츠', '반팔', '긴팔', '맨투맨', '후디', '후드', '셔츠', '블라우스', '니트',
+    '저지', '집업', '무스탕', '야상',
+    '팬츠', '바지', '청바지', '데님', '슬랙스', '조거', '레깅스', '쇼츠', '5부',
+    '원피스', '점프슈트', '큐롯', '스커트', '스커츠',
+    '가방', '백팩', '클러치', '토트', '크로스', '숄더', '지갑', '카드홀더',
+    '스니커즈', '로퍼', '부츠', '샌들', '슬리퍼', '구두',
+    '시계', '워치',
+    '벨트', '모자', '캡', '햇', '스카프', '머플러', '목걸이', '귀걸이', '반지', '팔찌',
+    '셋업',
+    '선글', '안경', '선글라스',
+    '퍼퓸', '향수',
+])
+
+# 한글 색상 단어
+_COLOR_WORDS = frozenset([
+    '블랙', '화이트', '그레이', '차콜', '네이비', '베이지', '브라운', '카키',
+    '레드', '블루', '그린', '옐로우', '핑크', '퍼플', '오렌지', '민트',
+    '크림', '아이보리', '골드', '실버', '멜란지', '스카이', '다크그레이',
+    '다크네이비', '라이트그레이',
+])
+
+
+def _is_size_only_line(line: str) -> bool:
+    """
+    사이즈 전용 라인 판정 (상품 유형 키워드는 보호).
+
+    True인 경우 - 상품명에서 제거:
+    - "M 95-100" / "2XL 110" (사이즈라벨 + 숫자)
+    - "95 100 105 110" (숫자 나열 2개 이상)
+    - "2번 95" / "3번 100" (번호 라벨)
+    - "라지 95-100" / "여성 55 ~ 77" (한글 사이즈 라벨)
+    - "M (66) . L (77)"
+    - "s55-66 m66-77"
+    - "라지95~100 엑스105~"
+
+    False인 경우 - 상품명 보존:
+    - "나일론 자켓" (상품유형 키워드 포함)
+    - "K26 멀티 컬러 크로스 후드집업"
+    """
+    # 상품 유형 키워드 포함 시 사이즈 라인 아님
+    for kw in _PRODUCT_TYPE_KEYWORDS:
+        if kw in line:
+            return False
+
+    # 패턴 A: 숫자만 나열 (최소 2개) "95 100 105 110"
+    if re.fullmatch(r'[\d\s\-~\.,()]+', line):
+        digit_count = len(re.findall(r'\d+', line))
+        if digit_count >= 2:
+            return True
+
+    # 패턴 B: "M 95-100" / "2XL 110" / "L 95 소량"
+    # 영문 사이즈라벨 + 숫자 포함 라인
+    if re.match(r'^\s*(?:XS|XL|2XL|3XL|4XL|XXL|XXXL|[SML])\b', line):
+        if re.search(r'\d', line):
+            # 상품명 포함 여부는 위에서 이미 체크됨
+            return True
+        # "S M L XL" 같이 라벨만
+        tokens = line.split()
+        if all(t in ('S', 'M', 'L', 'XL', '2XL', '3XL', 'XXL', 'XS') for t in tokens):
+            return True
+
+    # 패턴 C: "번호 + 숫자" -> "2번 95" / "3번 100"
+    if re.fullmatch(r'\d+\s*번\s*[\d\s\-~\.,()소량품절여유없음]+', line):
+        return True
+
+    # 패턴 D: 한글 사이즈 라벨 시작
+    # "라지 95-100" / "여성 55 ~ 77" / "남성 95~100. 105~110" / "남성 100~105. 105~110 여성 55 ~ 77 오버핏가능"
+    if re.match(
+        r'^\s*(라지|엑스|프리|오버|오버사이즈|스몰|미디엄|'
+        r'남성|여성|남자|여자|공용|남녀공용)',
+        line
+    ):
+        if re.search(r'\d', line):
+            return True
+
+    # 패턴 E: 사이즈 범위 표기 "s55-66 m66-77"
+    if re.fullmatch(r'[sSmMlLxX\s\d\-~\.,()]+', line.strip()):
+        digit_count = len(re.findall(r'\d+', line))
+        letter_count = len(re.findall(r'[sSmMlL]', line))
+        if digit_count >= 2 and letter_count >= 2:
+            return True
+
+    # 패턴 F: 한글 사이즈 라벨 붙어있는 경우 "라지95~100 엑스105~"
+    if re.search(
+        r'(라지|엑스|프리|스몰|미디엄)\s*\d+\s*[~\-]',
+        line
+    ):
+        return True
+
+    return False
+
+
+def _is_color_only_line(line: str) -> bool:
+    """
+    색상 전용 라인 판정 (사이즈 블록 이후에 오는 색상 나열).
+
+    True인 경우:
+    - "블랙 화이트" / "블랙 차콜" / "블랙 옐로우 민트 그레이"
+
+    False인 경우:
+    - "블랙 자켓" (상품 유형 키워드 포함)
+    """
+    # 상품 유형 키워드 있으면 색상 라인 아님
+    for kw in _PRODUCT_TYPE_KEYWORDS:
+        if kw in line:
+            return False
+
+    # 한글 색상명만 나열 (2개 이상)
+    tokens = re.findall(r'[가-힣]+', line)
+    if len(tokens) < 2:
+        return False
+    if all(t in _COLOR_WORDS for t in tokens):
+        return True
+    return False
 
 
 # 상품명 위치 판정 시 스킵할 마커 라인 (세트상품 따옴표 폴백 경로에서 사용)
