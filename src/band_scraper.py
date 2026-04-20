@@ -186,21 +186,50 @@ class BandScraper:
             return False
 
     def _is_session_valid(self) -> bool:
-        """현재 세션이 유효한지 확인."""
+        """
+        현재 세션이 유효한지 확인.
+
+        밴드 SPA 렌더링 대응:
+          1) networkidle 까지 대기 (HTML 로드 + 초기 JS 네트워크 요청 완료)
+          2) 로그인 리다이렉트 감지 (URL에 auth/login)
+          3) 피드 게시글 DOM 요소(article._postMainWrap) 최대 10초 폴링
+          4) 3) 실패 시 body 텍스트 길이로 최종 판단
+        """
         try:
             self._page.goto(f"{BAND_HOME}/feed", wait_until="domcontentloaded", timeout=15000)
-            time.sleep(2)
+            # SPA JS 초기 렌더링 대기 - networkidle이 가장 확실
+            try:
+                self._page.wait_for_load_state("networkidle", timeout=10000)
+            except Exception:
+                # networkidle 타임아웃은 무시하고 계속 진행
+                logger.debug("networkidle 타임아웃 (계속 진행)")
+
             url = self._page.url
-            if "auth.band.us" in url or "login" in url or "auth" in url:
+            if "auth.band.us" in url or "login" in url:
                 logger.info(f"세션 무효 (리다이렉트 URL: {url})")
                 return False
-            # 피드 페이지 내 실제 콘텐츠 존재 확인
-            body_text_len = len(self._page.inner_text("body").strip())
-            if body_text_len < 200:
-                logger.info(f"세션 무효 (페이지 콘텐츠 부족: {body_text_len}자)")
-                return False
-            return True
-        except Exception:
+
+            # 피드 게시글 DOM 폴링 (최대 10초)
+            try:
+                self._page.wait_for_selector(
+                    'article._postMainWrap, [class*="feed"], [class*="Feed"]',
+                    timeout=10000,
+                    state="attached",
+                )
+                logger.info("세션 유효 (피드 DOM 확인됨)")
+                return True
+            except Exception:
+                # DOM 폴링 실패 시 body 텍스트 길이로 폴백 판단
+                body_text_len = len(self._page.inner_text("body").strip())
+                if body_text_len < 200:
+                    logger.info(
+                        f"세션 무효 (피드 DOM 없음 + 페이지 콘텐츠 부족: {body_text_len}자)"
+                    )
+                    return False
+                logger.info(f"세션 유효 (body 텍스트 {body_text_len}자)")
+                return True
+        except Exception as e:
+            logger.warning(f"세션 유효성 확인 실패: {e}")
             return False
 
     # ── 로그인 ──
