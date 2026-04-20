@@ -120,6 +120,7 @@ def main():
                         golf_brand_tags=config.get("golf_brand_tags", []),
                         keyword_exclusions=config.get("keyword_exclusions", {}),
                         raw_content=post["content"],
+                        set_part=product.set_part,
                     )
 
                     gender = classify_gender(

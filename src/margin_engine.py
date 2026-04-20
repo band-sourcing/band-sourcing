@@ -2,8 +2,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# ── 상품 카테고리 8종 ──
-# bag / watch / wallet / shoes / outer / top / bottom / accessory / etc
+# ── 상품 카테고리 9종 ──
+# bag / watch / wallet / shoes / outer / top / bottom / set / accessory / etc
+# Task 9: "set"은 세트 상품(상의+하의 동시 판매) 전용 카테고리.
+# 분류 조건:
+#   1) set_part="top"/"bottom" 인 경우 (parse_set_product 로 분리된 상품)
+#   2) 의류천국22 + category_keywords.set 매칭 (상하세트/상하의 등)
+# 고객이 WC에서 직접 상의/하의로 이동하는 반자동 방식.
 
 # category_keywords 검색 우선순위
 _CATEGORY_PRIORITY = [
@@ -14,6 +19,7 @@ _CATEGORY_PRIORITY = [
     "outer",
     "top",
     "bottom",
+    "set",        # bottom 뒤, accessory 앞
     "accessory",
 ]
 
@@ -92,6 +98,7 @@ def classify_category(
     golf_brand_tags: list | None = None,
     keyword_exclusions: dict | None = None,
     raw_content: str = "",
+    set_part: str | None = None,
 ) -> str:
     """
     상품명 기반으로 카테고리 분류 — **last-match 방식**.
@@ -106,6 +113,9 @@ def classify_category(
 
     동일 위치에 여러 키워드가 매칭될 경우 _CATEGORY_PRIORITY 순서가 타이브레이커.
 
+    Task 9: set_part가 "top" 또는 "bottom"이면 무조건 "set" 반환.
+    세트 상품은 WC에서 반자동으로 상의/하의로 이동 처리한다.
+
     Fallback 체인 (키워드 매칭 실패 시):
       1) 시계 전용 브랜드 태그면 watch
       2) source_band이 "의류천국22"이고 raw_content 제공되면
@@ -114,9 +124,15 @@ def classify_category(
 
     Args:
         raw_content: 게시글 원본 텍스트 (의류천국22 실측치 분류에 사용). 미제공 시 skip.
+        set_part: "top"/"bottom"/None. None이 아니면 "set" 카테고리로 강제 분류.
         keyword_exclusions: 하위 호환성을 위해 파라미터 유지하지만 무시됨.
         golf_brand_tags: 하위 호환성을 위해 파라미터 유지하지만 무시됨.
     """
+    # Task 9: 세트 상품은 set_part 값 기반으로 set 카테고리로 강제 분류
+    # (parse_set_product 가 생성하는 상품만 set_part 값을 가짐)
+    if set_part in ("top", "bottom"):
+        return "set"
+
     text = product_name.lower()
 
     best_pos = -1
@@ -137,7 +153,31 @@ def classify_category(
                 best_priority = priority_idx
 
     if best_cat is not None:
-        return best_cat
+        # Task 9: set 카테고리는 의류천국22 밴드에서만 유효
+        # 잡화천국22에서 "상하세트" 같은 키워드가 매칭되면 (매우 드문 케이스) set 무시
+        if best_cat == "set" and source_band != "의류천국22":
+            # set 키워드 매칭 제외하고 다시 탐색
+            best_pos = -1
+            best_cat = None
+            best_priority = len(_CATEGORY_PRIORITY)
+            for priority_idx, cat_key in enumerate(_CATEGORY_PRIORITY):
+                if cat_key == "set":
+                    continue
+                keywords = category_keywords.get(cat_key, [])
+                for kw in keywords:
+                    kw_lower = kw.lower()
+                    pos = text.rfind(kw_lower)
+                    if pos == -1:
+                        continue
+                    if pos > best_pos or (pos == best_pos and priority_idx < best_priority):
+                        best_pos = pos
+                        best_cat = cat_key
+                        best_priority = priority_idx
+            if best_cat is not None:
+                return best_cat
+            # 재탐색 실패 시 아래 fallback 체인으로
+        else:
+            return best_cat
 
     # 브랜드 기반 폴백: 시계 전용 브랜드는 키워드 없어도 watch
     if brand_tag in _WATCH_BRAND_TAGS:

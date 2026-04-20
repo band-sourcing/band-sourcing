@@ -24,6 +24,7 @@ margin:
     accessory: 30000
     wallet: 30000
     shoes: 30000
+    set: 30000       # Task 9: 세트 상품 (etc와 동일)
     etc: 30000
 
 category_keywords:
@@ -242,6 +243,13 @@ category_keywords:
     - "하프"
     - "쇼트"
     - "쇼트팬츠"
+  # Task 9: 세트 상품 (상의+하의 동시 판매).
+  # 의류 전용 키워드만 포함 -> 잡화 "양말 세트"/"남성팬티 3종세트" 등의 false positive 방지.
+  # classify_category에서 source_band == "의류천국22" 일 때만 set으로 확정.
+  set:
+    - "상하세트"
+    - "상하의"
+    - "상하 세트"
   wallet:
     - "지갑"
     - "카드홀더"
@@ -557,6 +565,7 @@ wc_categories:
   accessory: 89
   wallet: 83
   shoes: 84
+  set: 30          # TODO: Task 9 - WC 관리자에서 세트 카테고리 생성 후 실제 ID로 교체 필요
   etc: 31          # Step4 FIX-B: 미분류 (accessory 89와 분리)
 
 images:
@@ -574,6 +583,8 @@ duplicate:
     enabled: true
   bottom:
     enabled: false
+  set:               # Task 9: 세트 상품도 중복 체크
+    enabled: true
   accessory:
     enabled: false
   wallet:

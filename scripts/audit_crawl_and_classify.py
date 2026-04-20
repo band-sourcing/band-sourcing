@@ -122,6 +122,7 @@ def build_row_from_product(
         category_keywords,
         brand_tag=product.brand_tag,
         raw_content=txtbody_raw,
+        set_part=product.set_part,
     )
 
     # 제외 필터 판정 (원본 dict를 건드리지 않고 사유만 기록)
