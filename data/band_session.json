@@ -1,7 +1,17 @@
 [
   {
+    "name": "oauthVerifyToken",
+    "value": "\"18ebf088:AzEa08b8KVodiuz+DFamGHqQspH70hwFhLyTWgFM5zY=\"",
+    "domain": ".band.us",
+    "path": "/oauth2/authorize",
+    "expires": -1,
+    "httpOnly": false,
+    "secure": true,
+    "sameSite": "Lax"
+  },
+  {
     "name": "secretKey",
-    "value": "\"uAszYMl/WBnErqH805xHcMb/estDinSRk6pZ6iX/Ges=\"",
+    "value": "\"7afIn1KViTfqLCByWI/Zhsu48Fvsss4hpuoP4OUS5hU=\"",
     "domain": ".band.us",
     "path": "/s/login/getKey",
     "expires": -1,
@@ -10,8 +20,28 @@
     "sameSite": "Lax"
   },
   {
-    "name": "ai",
-    "value": "\"8679e7d,19daef19008\"",
+    "name": "BBC",
+    "value": "2RizTFPFQoiblAoBUJHdh9",
+    "domain": ".band.us",
+    "path": "/",
+    "expires": 1811252994.023854,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "di",
+    "value": "web-AAAAAB2ajTmnvf3q1YWAZ2rKVKI8IEcL7HGpwNw2ty_C0l8egLuYAmwrYayQ4V7bfM8DQk",
+    "domain": ".band.us",
+    "path": "/",
+    "expires": 1811253105.293986,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "band_session",
+    "value": "ZQIAAAR0YAIpC2bX58zD1pxZF-ueOGBAMqX69jVD9SMCdShMWaOQtfXeuo0f3f0A4KFOpXcJY9S_Y3iL4BCFKIg2b23W6GV96pGBdnn-IKCBzBVC",
     "domain": ".band.us",
     "path": "/",
     "expires": -1,
@@ -21,7 +51,7 @@
   },
   {
     "name": "as",
-    "value": "\"1dd48d95:RW2lPlPb+wov7PTqC97m4zQV4/mVtjJQD+Rae2xyd3w=\"",
+    "value": "\"18ebf088:AzEa08b8KVodiuz+DFamGHqQspH70hwFhLyTWgFM5zY=\"",
     "domain": ".band.us",
     "path": "/",
     "expires": -1,
@@ -30,8 +60,8 @@
     "sameSite": "Lax"
   },
   {
-    "name": "band_session",
-    "value": "ZQIAALTzVqCrZfKzq_ki2pPoLc-MLNnqQ8PJieBNhvCMh8PtJVa8_8qSwiig6_lOBHwqReA0yu8dKZyb-4ERV0vXkhHFOgr4sOkfFefy3UeCIq2f",
+    "name": "ai",
+    "value": "\"8679e7d,19db576739d\"",
     "domain": ".band.us",
     "path": "/",
     "expires": -1,
@@ -40,38 +70,8 @@
     "sameSite": "Lax"
   },
   {
-    "name": "BBC",
-    "value": "df94ab81-c0e0-4c87-88e7-83600622b1df",
-    "domain": ".band.us",
-    "path": "/",
-    "expires": 1810992319.136,
-    "httpOnly": false,
-    "secure": false,
-    "sameSite": "Lax"
-  },
-  {
-    "name": "di",
-    "value": "web-AAAAABwtSwHeaQESCvrAZ047Juqhcj6cB1VJRks_NcR05U-j6Z1n8y4cySLC_2RxER143s",
-    "domain": ".band.us",
-    "path": "/",
-    "expires": 1810992326.567,
-    "httpOnly": false,
-    "secure": false,
-    "sameSite": "Lax"
-  },
-  {
-    "name": "language",
-    "value": "ko",
-    "domain": ".band.us",
-    "path": "/",
-    "expires": 1811177952.464343,
-    "httpOnly": false,
-    "secure": false,
-    "sameSite": "Lax"
-  },
-  {
     "name": "rt",
-    "value": "\"ZQIAANIhf9J7m9BT0XyBFPkEwL9N_xRwcM8vZZeDV11OJ42yoQoToJnNYaMT83Vso9fxxxTM8nT6Z4qfwyI2lHbo8Swghpk-5JEYvWcL_J-mRUOV,s\"",
+    "value": "\"ZQIAAI1L4-x8811vNKqiLCNgGVIofv4MtqL50Er0kt6N96ZwHL6N6QY4Hjfe_hponMtnp-nXgF0Cx0I_UMXtVsgnW4l3CiS31wjvkHpOGhW_-5QT,s\"",
     "domain": ".auth.band.us",
     "path": "/",
     "expires": -1,
@@ -81,7 +81,7 @@
   },
   {
     "name": "SESSION",
-    "value": "2pjtXIaOe/ecLW60xZMv8fPTGUX4f5UueUQyXoxlwuNO3AdL1oo19vte8QgYVhME",
+    "value": "VCYgVyGzxKyjo5h0ubWrekAAONQf4Sn8Irobh795mpes2ZdKQEyKBfMxVwD7cIJM",
     "domain": "auth.band.us",
     "path": "/",
     "expires": -1,
@@ -90,8 +90,18 @@
     "sameSite": "Lax"
   },
   {
+    "name": "language",
+    "value": "ko",
+    "domain": ".band.us",
+    "path": "/",
+    "expires": 1811256562.542271,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
     "name": "JSESSIONID",
-    "value": "F7C9103B65EF562E87E5C2D8CFDAF497",
+    "value": "22A8C3706DF857C9E95711AC05A8E471",
     "domain": "www.band.us",
     "path": "/",
     "expires": -1,
