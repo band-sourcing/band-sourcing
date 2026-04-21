@@ -1,7 +1,7 @@
 [
   {
     "name": "oauthVerifyToken",
-    "value": "\"18ebf088:AzEa08b8KVodiuz+DFamGHqQspH70hwFhLyTWgFM5zY=\"",
+    "value": "\"1c5a1fe0:wh07Tp523jL/JhA2Geep7csFRPb07/GsrTiBB9h2SOc=\"",
     "domain": ".band.us",
     "path": "/oauth2/authorize",
     "expires": -1,
@@ -50,36 +50,6 @@
     "sameSite": "Lax"
   },
   {
-    "name": "as",
-    "value": "\"18ebf088:AzEa08b8KVodiuz+DFamGHqQspH70hwFhLyTWgFM5zY=\"",
-    "domain": ".band.us",
-    "path": "/",
-    "expires": -1,
-    "httpOnly": false,
-    "secure": true,
-    "sameSite": "Lax"
-  },
-  {
-    "name": "ai",
-    "value": "\"8679e7d,19db576739d\"",
-    "domain": ".band.us",
-    "path": "/",
-    "expires": -1,
-    "httpOnly": false,
-    "secure": false,
-    "sameSite": "Lax"
-  },
-  {
-    "name": "rt",
-    "value": "\"ZQIAAI1L4-x8811vNKqiLCNgGVIofv4MtqL50Er0kt6N96ZwHL6N6QY4Hjfe_hponMtnp-nXgF0Cx0I_UMXtVsgnW4l3CiS31wjvkHpOGhW_-5QT,s\"",
-    "domain": ".auth.band.us",
-    "path": "/",
-    "expires": -1,
-    "httpOnly": false,
-    "secure": true,
-    "sameSite": "Lax"
-  },
-  {
     "name": "SESSION",
     "value": "VCYgVyGzxKyjo5h0ubWrekAAONQf4Sn8Irobh795mpes2ZdKQEyKBfMxVwD7cIJM",
     "domain": "auth.band.us",
@@ -94,14 +64,44 @@
     "value": "ko",
     "domain": ".band.us",
     "path": "/",
-    "expires": 1811256562.542271,
+    "expires": 1811307894.858079,
     "httpOnly": false,
     "secure": false,
     "sameSite": "Lax"
   },
   {
+    "name": "as",
+    "value": "\"1c5a1fe0:wh07Tp523jL/JhA2Geep7csFRPb07/GsrTiBB9h2SOc=\"",
+    "domain": ".band.us",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": false,
+    "secure": true,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "ai",
+    "value": "\"8679e7d,19db8549c30\"",
+    "domain": ".band.us",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "rt",
+    "value": "\"ZQIAADbK9WDF-h8j48vni_GhLb2-IKUfxVbUbPLkIcC6MLJodlcEkvkPad272ptbxOD6ryB3DRItZNHKcTnR9_EDbmUffTgkuZusOALhJgufczqb,s\"",
+    "domain": ".auth.band.us",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": false,
+    "secure": true,
+    "sameSite": "Lax"
+  },
+  {
     "name": "JSESSIONID",
-    "value": "22A8C3706DF857C9E95711AC05A8E471",
+    "value": "CBFA1878BD20B515C4EB1806C594F786",
     "domain": "www.band.us",
     "path": "/",
     "expires": -1,

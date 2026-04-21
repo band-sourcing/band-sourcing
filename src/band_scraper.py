@@ -421,7 +421,7 @@ class BandScraper:
             return True
         return False
 
-    def fetch_all_posts(self, band_key: str) -> list[dict]:
+    def fetch_all_posts(self, band_key: str, max_scroll_attempts: int = 100) -> list[dict]:
         """
         밴드의 게시글을 스크롤하면서 수집.
         cutoff_date 이전 게시글이 나오면 중단.
