@@ -666,7 +666,7 @@ wc_categories:
   accessory: 89
   wallet: 83
   shoes: 84
-  set: 30          # TODO: Task 9 - WC 관리자에서 세트 카테고리 생성 후 실제 ID로 교체 필요
+  set: 91          # Task 9: 세트 카테고리 (실제 WC ID 확인 완료 2026-04-21)
   etc: 31          # Step4 FIX-B: 미분류 (accessory 89와 분리)
 
 images:
