@@ -75,6 +75,20 @@ def is_set_product(content: str) -> bool:
     if has_top_size and has_bottom_size:
         return True
 
+    # D) 세트 키워드 단독: "세트/셋업/셋트/Set" 포함 시 set 판정
+    # (의류천국22 필터링은 classify_category에서 처리)
+    if re.search(r'세트|셋업|셋트|\bSet\b|\bSET\b', content):
+        return True
+
+    # E) 라벨 없는 사이즈 동시 존재:
+    # 상의 사이즈(90/95/100/105/110) + 하의 사이즈(28/30/32/34/36/38/40) 동시 존재
+    # "상의"/"하의" 라벨 없어도 판정 -> false positive 방지: 가격 숫자 제외
+    content_no_price = re.sub(r'\d{2,6}\s*\([A-Za-z][A-Za-z0-9]*\)', '', content)
+    unlabeled_top = bool(re.search(r'(?<![0-9])(?:90|95|100|105|110)(?![0-9])', content_no_price))
+    unlabeled_bottom = bool(re.search(r'(?<![0-9])(?:28|30|32|34|36|38|40)(?![0-9])', content_no_price))
+    if unlabeled_top and unlabeled_bottom:
+        return True
+
     return False
 
 
