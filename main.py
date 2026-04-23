@@ -14,6 +14,7 @@ from src.content_parser import parse_post, ParseError
 from src.margin_engine import calculate_sell_price, classify_category, classify_gender
 from src.wc_uploader import WooCommerceUploader
 from src.auto_delete import auto_delete_old_products
+from src.search_supplement import fetch_search_posts, build_search_keywords
 
 
 def setup_logging(config):
@@ -79,6 +80,32 @@ def main():
                 p["_band_key"] = band_key
             all_posts.extend(posts)
             logger.info(f"  {band_name}: {len(posts)}개 수집")
+
+        # Step 1.5: 검색 기반 보충 수집 (피드 스크롤 한계 우회)
+        search_targets = build_search_keywords(config)
+        if search_targets:
+            logger.info("=== Step 1.5: 검색 기반 보충 수집 ===")
+            existing_keys = {p["post_key"] for p in all_posts}
+            cutoff_dt = datetime.strptime(config["band"]["cutoff_date"], "%Y-%m-%d")
+
+            for band_name, keywords in search_targets.items():
+                band_key = band_keys.get(band_name)
+                if not band_key:
+                    logger.warning(f"  검색 대상 밴드 키 없음: {band_name}")
+                    continue
+
+                logger.info(f"  {band_name}: {len(keywords)}개 키워드 검색 시작")
+                search_posts = fetch_search_posts(
+                    scraper, band_key, keywords, cutoff_dt, existing_keys
+                )
+
+                for p in search_posts:
+                    p["_source_band"] = band_name
+                    p["_band_key"] = band_key
+                    existing_keys.add(p["post_key"])
+
+                all_posts.extend(search_posts)
+                logger.info(f"  {band_name}: 검색 보충 {len(search_posts)}개 추가")
 
         scraper.close()
         stats["posts_fetched"] = len(all_posts)

@@ -715,3 +715,31 @@ exclusion:
 logging:
   level: "INFO"
   log_dir: "logs"
+
+search_supplement:
+  enabled: true
+  targets:
+    "잡화천국22":
+      brand_tags:
+        - "#RL"
+        - "#OM"
+        - "#AP"
+        - "#HB"
+        - "#BR"
+        - "#IW"
+        - "#PK"
+        - "#VR"
+        - "#BU"
+        - "#RM"
+        - "#PI"
+        - "#UN"
+        - "#FK"
+        - "#RU"
+        - "#JE"
+        - "#TH"
+        - "#CP"
+        - "#CT"
+        - "#SM"
+      keywords:
+        - "시계"
+        - "워치"
